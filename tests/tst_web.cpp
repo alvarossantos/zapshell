@@ -13,6 +13,7 @@ private slots:
     void uaDropsQtTokens();
     void whatsappGetsMicButOthersDoNot();
     void grantsNotificationsOnlyForWhatsapp();
+    void trustedOriginIsExact();
 };
 
 void TestWeb::flagsHaveBudgetDefaults()
@@ -54,6 +55,13 @@ void TestWeb::grantsNotificationsOnlyForWhatsapp()
 {
     QVERIFY(zs::web::permissionGranted("https://web.whatsapp.com", zs::FeatureNotifications));
     QVERIFY(!zs::web::permissionGranted("https://evil.example", zs::FeatureNotifications));
+}
+
+void TestWeb::trustedOriginIsExact()
+{
+    QVERIFY(zs::web::trustedOrigin(QStringLiteral("https://web.whatsapp.com")));
+    QVERIFY(!zs::web::trustedOrigin(QStringLiteral("https://web.whatsapp.com/")));
+    QVERIFY(!zs::web::trustedOrigin(QStringLiteral("https://evil.example")));
 }
 
 QTEST_GUILESS_MAIN(TestWeb)

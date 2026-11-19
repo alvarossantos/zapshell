@@ -13,3 +13,4 @@ add_dependencies(tst_cli zapshell)
 
 zs_test(tst_web)
 zs_test(tst_instance)
+zs_test(tst_notify)

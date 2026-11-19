@@ -2,15 +2,19 @@
 
 #include "cli.h"
 #include "instance.h"
+#include "notify.h"
 #include "paths.h"
 #include "profile.h"
 #include "tray.h"
 #include "window.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
+#include <QWebEngineNotification>
+#include <QWebEngineProfile>
 #include <QWebEnginePage>
 
 namespace zs {
@@ -101,6 +105,25 @@ int App::run(const cli::Options &options)
     });
     connect(&tray, &Tray::quitRequested, this, [] { requestQuit(); });
     connect(&window, &Window::hiddenToTray, &tray, [] {});
+
+    Notifier notifier;
+    connect(&tray, &Tray::silentToggled, &notifier, &Notifier::setSilent);
+    connect(&notifier, &Notifier::clicked, &window, &Window::showAndRaise);
+
+    profile.profile()->setNotificationPresenter(
+        [&notifier](std::unique_ptr<QWebEngineNotification> notification) {
+            const auto decision = decideNotify(notification->title(),
+                                               QDateTime::currentMSecsSinceEpoch(),
+                                               notifier.isSilent());
+            if (decision == NotifyDecision::Send)
+                notifier.show(notification->title(), notification->message());
+            // Mesmo agrupada/descartada, a página precisa saber que foi tratada.
+            notification->show();
+        });
+
+    connect(profile.page(), &QWebEnginePage::titleChanged, &tray, [&tray](const QString &title) {
+        tray.setUnread(unreadFromTitle(title));
+    });
 
     profile.page()->load(QUrl(QStringLiteral("https://web.whatsapp.com")));
 
