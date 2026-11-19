@@ -9,6 +9,7 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS Core Widgets WebEngineWidgets WebChann
 
 add_library(zapshell_core STATIC
     src/cli.cpp
+    src/instance.cpp
     src/paths.cpp
     src/web.cpp
 )
