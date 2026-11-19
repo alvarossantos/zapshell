@@ -146,13 +146,15 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
     const QString displaced =
         profileDir + QStringLiteral(".before-restore-")
         + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
-    if (!QFile::rename(profileDir, displaced)) {
+    const bool hadProfile = info.isDir();
+    if (hadProfile && !QFile::rename(profileDir, displaced)) {
         if (error)
             *error = QStringLiteral("não foi possível mover o perfil atual");
         return false;
     }
     if (!QFile::rename(staging.path() + "/" + name, profileDir)) {
-        QFile::rename(displaced, profileDir);
+        if (hadProfile)
+            QFile::rename(displaced, profileDir);
         if (error)
             *error = QStringLiteral("não foi possível instalar o perfil restaurado");
         return false;

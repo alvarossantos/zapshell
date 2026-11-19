@@ -10,6 +10,7 @@ private slots:
     void parsesFlags();
     void rejectsUnknownFlag();
     void restoreTakesPath();
+    void rejectsConflictingActions();
     void unknownFlagWritesStderr();
     void versionGoesToStdout();
 };
@@ -31,6 +32,20 @@ void TestCli::versionGoesToStdout()
     QVERIFY(process.waitForFinished(10000));
     QCOMPARE(process.exitCode(), 0);
     QVERIFY(process.readAllStandardOutput().contains("zapshell"));
+}
+
+void TestCli::rejectsConflictingActions()
+{
+    char a0[] = "zapshell";
+    char a1[] = "--backup";
+    char a2[] = "--restore";
+    char a3[] = "/tmp/arquivo.tar.gz";
+    char *argv[] = {a0, a1, a2, a3};
+    zs::cli::Options options;
+    QString error;
+
+    QVERIFY(!zs::cli::parseArgs(4, argv, options, error));
+    QVERIFY2(error.contains("backup"), qPrintable(error));
 }
 
 void TestCli::parsesFlags()

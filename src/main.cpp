@@ -46,6 +46,9 @@ int backupFlow()
     if (!zs::createBackup(zs::paths::profileDir(), zs::paths::backupDir(),
                           QDateTime::currentDateTime(), &archive, &error)) {
         QTextStream(stderr) << "zapshell: " << error << Qt::endl;
+        if (wasRunning)
+            QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                    {QStringLiteral("--hidden")});
         return 1;
     }
     QTextStream(stdout) << archive << Qt::endl;

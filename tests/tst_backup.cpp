@@ -4,6 +4,7 @@
 #include <QProcess>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include "backup.h"
@@ -17,6 +18,7 @@ private slots:
     void nameIsSortable();
     void createAndRestoreRoundTrip();
     void refusesPathTraversal();
+    void restoresWhenProfileIsMissing();
 };
 
 void TestBackup::keepsNewestFour()
@@ -92,6 +94,34 @@ void TestBackup::refusesPathTraversal()
     QString error;
     QVERIFY(!zs::restoreBackup(dir.path() + "/evil.tar.gz", dir.path() + "/profile", &error));
     QVERIFY(!error.isEmpty());
+}
+
+void TestBackup::restoresWhenProfileIsMissing()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString profile = dir.path() + "/profile";
+    const QString backups = dir.path() + "/backups";
+    QVERIFY(QDir().mkpath(profile));
+
+    QFile original(profile + "/history.dat");
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    original.write("sobrevivente");
+    original.close();
+
+    const QDateTime now(QDate(2026, 11, 18), QTime(9, 5, 3));
+    QString archive;
+    QString error;
+    QVERIFY2(zs::createBackup(profile, backups, now, &archive, &error), qPrintable(error));
+
+    // Perdemos o diretório do perfil inteiro — é exatamente o cenário do restore.
+    QVERIFY(QDir(profile).removeRecursively());
+    QVERIFY(!QFileInfo::exists(profile));
+
+    QVERIFY2(zs::restoreBackup(archive, profile, &error), qPrintable(error));
+    QFile restored(profile + "/history.dat");
+    QVERIFY(restored.open(QIODevice::ReadOnly));
+    QCOMPARE(restored.readAll(), QByteArray("sobrevivente"));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)

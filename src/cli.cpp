@@ -35,6 +35,14 @@ bool parseArgs(int argc, char **argv, Options &out, QString &error)
         }
     }
 
+    // `--backup` encerra o app para tarra; `--restore` exige app parado e
+    // substitui o perfil. Aceitar os dois juntos faria o main silenciosamente
+    // descartar um deles.
+    if (parsed.backup && parsed.restore) {
+        error = "flags mutuamente exclusivas: --backup e --restore";
+        return false;
+    }
+
     out = parsed;
     return true;
 }
