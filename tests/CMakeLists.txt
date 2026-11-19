@@ -10,3 +10,5 @@ zs_test(tst_paths)
 
 target_compile_definitions(tst_cli PRIVATE ZAPSHELL_BIN="$<TARGET_FILE:zapshell>")
 add_dependencies(tst_cli zapshell)
+
+zs_test(tst_web)

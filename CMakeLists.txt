@@ -10,9 +10,13 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS Core Widgets WebEngineWidgets WebChann
 add_library(zapshell_core STATIC
     src/cli.cpp
     src/paths.cpp
+    src/web.cpp
 )
 target_include_directories(zapshell_core PUBLIC src)
-target_link_libraries(zapshell_core PUBLIC Qt6::Core)
+target_link_libraries(zapshell_core
+    PUBLIC Qt6::Core
+    PRIVATE Qt6::WebEngineCore
+)
 
 add_executable(zapshell src/main.cpp)
 target_link_libraries(zapshell PRIVATE zapshell_core Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel)
