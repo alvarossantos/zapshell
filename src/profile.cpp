@@ -110,6 +110,11 @@ void Profile::onDownloadRequested(QWebEngineDownloadRequest *download)
 
     download->setDownloadDirectory(directory);
     download->setDownloadFileName(uniqueFileName(directory, download->downloadFileName()));
+    connect(download, &QWebEngineDownloadRequest::isFinishedChanged, this,
+            [this, download] {
+                if (download->isFinished())
+                    emit downloadFinished(download->downloadFileName());
+            });
     download->accept();
 }
 

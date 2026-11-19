@@ -3,7 +3,9 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QMessageBox>
+#include <QToolBar>
 #include <QWebEnginePage>
 #include <QWebEngineView>
 
@@ -17,11 +19,21 @@ const char *const kQuittingProperty = "zsQuitting";
 Window::Window(QWebEnginePage *page, QWidget *parent)
     : QMainWindow(parent)
 {
-    auto *view = new QWebEngineView(this);
-    view->setPage(page);
-    setCentralWidget(view);
+    m_view = new QWebEngineView(this);
+    m_view->setPage(page);
+    setCentralWidget(m_view);
     resize(1200, 800);
     setWindowTitle(QStringLiteral("zapshell"));
+
+    m_findBar = addToolBar(QStringLiteral("Buscar"));
+    m_findBar->setAllowedAreas(Qt::BottomToolBarArea);
+    m_findEdit = new QLineEdit(m_findBar);
+    m_findEdit->setPlaceholderText(QStringLiteral("Buscar na conversa"));
+    m_findBar->addWidget(m_findEdit);
+    m_findBar->hide();
+
+    connect(m_findEdit, &QLineEdit::textChanged, this,
+            [this](const QString &text) { m_view->findText(text); });
 }
 
 void Window::showAndRaise()
@@ -62,6 +74,22 @@ void Window::keyPressEvent(QKeyEvent *event)
             qApp->setProperty(kQuittingProperty, true);
             qApp->quit();
         }
+        return;
+    }
+    if (event->matches(QKeySequence::Refresh)) {
+        m_view->page()->triggerAction(QWebEnginePage::Reload);
+        return;
+    }
+    if (event->matches(QKeySequence::Find)) {
+        m_findBar->setVisible(!m_findBar->isVisible());
+        if (m_findBar->isVisible())
+            m_findEdit->setFocus();
+        else
+            m_view->findText(QString());
+        return;
+    }
+    if (event->key() == Qt::Key_M && event->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
+        emit silentToggleRequested();
         return;
     }
 

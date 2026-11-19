@@ -24,6 +24,9 @@ public:
     QWebEngineProfile *profile() const { return m_profile; }
     QWebEnginePage *page() const { return m_page; }
 
+signals:
+    void downloadFinished(const QString &fileName);
+
 private:
     void onPermissionRequested(QWebEnginePermission permission);
     void onQuotaRequested(QWebEngineQuotaRequest request);

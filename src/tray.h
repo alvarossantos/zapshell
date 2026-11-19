@@ -17,6 +17,7 @@ public:
     explicit Tray(QObject *parent = nullptr);
 
     void setUnread(int count);
+    void toggleSilent();
 
 signals:
     void showRequested();

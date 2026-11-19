@@ -13,6 +13,7 @@ add_library(zapshell_core STATIC
     src/instance.cpp
     src/notify.cpp
     src/paths.cpp
+    src/stats.cpp
     src/web.cpp
 )
 target_include_directories(zapshell_core PUBLIC src)

@@ -3,8 +3,10 @@
 #include "cli.h"
 #include "instance.h"
 #include "paths.h"
+#include "web.h"
 
 #include <QApplication>
+#include <QByteArray>
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QFile>
@@ -86,6 +88,10 @@ int main(int argc, char **argv)
         QTextStream(stdout) << "zapshell " << ZAPSHELL_VERSION << Qt::endl;
         return 0;
     }
+
+    // Precisa ser definido antes de qualquer inicialização do WebEngine.
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
+            zs::web::chromiumFlags(qEnvironmentVariable("ZAPSHELL_FLAGS")).toLocal8Bit());
 
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("zapshell"));

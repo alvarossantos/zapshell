@@ -21,10 +21,10 @@ void TestWeb::flagsHaveBudgetDefaults()
     const QString flags = zs::web::chromiumFlags(QString());
 
     QVERIFY(flags.contains("--renderer-process-limit=1"));
-    QVERIFY(flags.contains("--max-old-space-size=384"));
+    QVERIFY(flags.contains("--max-old-space-size=256"));
     QVERIFY(flags.contains("--disable-features=Translate,MediaRouter,OptimizationHints"));
     QVERIFY(flags.contains("--disable-background-networking"));
-    QVERIFY(!flags.contains("--disable-gpu"));
+    QVERIFY(flags.contains("--disable-gpu"));
 }
 
 void TestWeb::overridesReplaceDefaults()

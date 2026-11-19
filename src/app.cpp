@@ -5,13 +5,17 @@
 #include "notify.h"
 #include "paths.h"
 #include "profile.h"
+#include "stats.h"
 #include "tray.h"
 #include "window.h"
+
+#include <unistd.h>
 
 #include <QApplication>
 #include <QDateTime>
 #include <QProcess>
 #include <QTextStream>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 #include <QWebEngineNotification>
@@ -27,6 +31,17 @@ void requestQuit()
 {
     qApp->setProperty(kQuittingProperty, true);
     qApp->quit();
+}
+
+QString sampleStats()
+{
+    const qint64 pid = QCoreApplication::applicationPid();
+    const quint64 before = processTreeJiffies(pid);
+    QThread::msleep(250);
+    const quint64 after = processTreeJiffies(pid);
+    const double hertz = double(::sysconf(_SC_CLK_TCK));
+    const double cpu = hertz > 0 ? (after - before) / hertz / 0.25 * 100.0 : 0.0;
+    return formatStats(processTreeRssKb(pid), cpu);
 }
 
 } // namespace
@@ -60,11 +75,18 @@ int App::run(const cli::Options &options)
     } else {
         QString reply;
         if (lock.send(verb, &reply)) {
-            QTextStream(stdout) << reply << Qt::endl;
+            const QString shown = (verb == QLatin1String("stats") && reply.startsWith(QLatin1String("ok ")))
+                                      ? reply.mid(3)
+                                      : reply;
+            QTextStream(stdout) << shown << Qt::endl;
             return reply.startsWith(QLatin1String("ok")) ? 0 : 1;
         }
         if (verb == QLatin1String("quit") || verb == QLatin1String("toggle"))
             return 0;
+        if (verb == QLatin1String("stats")) {
+            QTextStream(stdout) << sampleStats() << Qt::endl;
+            return 0;
+        }
         if (verb == QLatin1String("stats") || verb == QLatin1String("backup")) {
             QTextStream(stderr) << "zapshell: não há instância em execução" << Qt::endl;
             return 1;
@@ -102,7 +124,7 @@ int App::run(const cli::Options &options)
             return QStringLiteral("ok stopping");
         }
         if (verb == QLatin1String("stats"))
-            return QStringLiteral("err not implemented");
+            return QStringLiteral("ok ") + sampleStats();
         return QStringLiteral("err unknown verb");
     });
 
@@ -115,9 +137,13 @@ int App::run(const cli::Options &options)
         QProcess::startDetached(QCoreApplication::applicationFilePath(),
                                 {QStringLiteral("--backup")});
     });
-    connect(&window, &Window::hiddenToTray, &tray, [] {});
-
     Notifier notifier;
+    connect(&window, &Window::hiddenToTray, &tray, [] {});
+    connect(&window, &Window::silentToggleRequested, &tray, [&tray] { tray.toggleSilent(); });
+    connect(&profile, &Profile::downloadFinished, &notifier, [&notifier](const QString &fileName) {
+        notifier.show(QStringLiteral("Download concluído"), fileName);
+    });
+
     connect(&tray, &Tray::silentToggled, &notifier, &Notifier::setSilent);
     connect(&notifier, &Notifier::clicked, &window, &Window::showAndRaise);
 

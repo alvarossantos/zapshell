@@ -57,4 +57,9 @@ void Tray::setUnread(int count)
                                  : QStringLiteral("zapshell"));
 }
 
+void Tray::toggleSilent()
+{
+    m_silent->toggle();
+}
+
 } // namespace zs

@@ -27,7 +27,8 @@ namespace {
 
 const char *const kDefaultFlags =
     "--renderer-process-limit=1 "
-    "--js-flags=--max-old-space-size=384 "
+    "--js-flags=--max-old-space-size=256 "
+    "--disable-gpu "
     "--disable-features=Translate,MediaRouter,OptimizationHints "
     "--disable-background-networking";
 

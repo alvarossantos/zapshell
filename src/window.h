@@ -2,7 +2,10 @@
 
 #include <QMainWindow>
 
+class QLineEdit;
+class QToolBar;
 class QWebEnginePage;
+class QWebEngineView;
 
 namespace zs {
 
@@ -20,10 +23,16 @@ public:
 
 signals:
     void hiddenToTray();
+    void silentToggleRequested();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+
+private:
+    QWebEngineView *m_view = nullptr;
+    QToolBar *m_findBar = nullptr;
+    QLineEdit *m_findEdit = nullptr;
 };
 
 } // namespace zs
