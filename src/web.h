@@ -12,8 +12,11 @@ QString chromiumFlags(const QString &overrides);
 // tratar o cliente como navegador não suportado.
 QString normalizeUserAgent(QString userAgent);
 
-// Origem exata (`scheme://host[:port]`) recebe permissão apenas para captura de
-// áudio/vídeo/tela e notificações. Qualquer outra origem ou feature é negada.
+// Origem exata (`scheme://host[:port]`) do WhatsApp Web.
+bool trustedOrigin(const QString &origin);
+
+// Origem confiável recebe permissão apenas para captura de áudio/vídeo/tela e
+// notificações. Qualquer outra origem ou feature é negada.
 bool permissionGranted(const QString &origin, int feature);
 
 } // namespace zs::web

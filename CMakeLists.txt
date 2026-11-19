@@ -19,8 +19,19 @@ target_link_libraries(zapshell_core
     PRIVATE Qt6::WebEngineCore
 )
 
+add_library(zapshell_ui STATIC
+    src/app.cpp
+    src/profile.cpp
+    src/tray.cpp
+    src/window.cpp
+)
+target_link_libraries(zapshell_ui
+    PUBLIC zapshell_core
+    PRIVATE Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebEngineCore
+)
+
 add_executable(zapshell src/main.cpp)
-target_link_libraries(zapshell PRIVATE zapshell_core Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel)
+target_link_libraries(zapshell PRIVATE zapshell_ui Qt6::Widgets)
 target_compile_definitions(zapshell PRIVATE ZAPSHELL_VERSION="${PROJECT_VERSION}")
 
 enable_testing()

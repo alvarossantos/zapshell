@@ -1,5 +1,7 @@
+#include "app.h"
 #include "cli.h"
 
+#include <QApplication>
 #include <QTextStream>
 
 int main(int argc, char **argv)
@@ -16,6 +18,12 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    QTextStream(stderr) << "zapshell: ainda não implementado" << Qt::endl;
-    return 1;
+    QApplication app(argc, argv);
+    QApplication::setApplicationName(QStringLiteral("zapshell"));
+    QApplication::setApplicationVersion(QStringLiteral(ZAPSHELL_VERSION));
+    QApplication::setDesktopFileName(QStringLiteral("zapshell"));
+    QApplication::setQuitOnLastWindowClosed(false);
+
+    zs::App zapshell;
+    return zapshell.run(options);
 }

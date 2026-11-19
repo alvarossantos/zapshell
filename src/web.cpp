@@ -48,9 +48,14 @@ QString normalizeUserAgent(QString userAgent)
     return userAgent.simplified();
 }
 
+bool trustedOrigin(const QString &origin)
+{
+    return origin == kWhatsappOrigin;
+}
+
 bool permissionGranted(const QString &origin, int feature)
 {
-    if (origin != kWhatsappOrigin)
+    if (!trustedOrigin(origin))
         return false;
 
     switch (feature) {
