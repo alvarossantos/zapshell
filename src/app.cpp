@@ -10,6 +10,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QProcess>
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
@@ -80,7 +81,7 @@ int App::run(const cli::Options &options)
     Window window(profile.page());
     Tray tray;
 
-    lock.setHandler([&window](const QString &verb) {
+    lock.setHandler([&profile, &window](const QString &verb) {
         if (verb == QLatin1String("show")) {
             window.showAndRaise();
             return QStringLiteral("ok");
@@ -94,7 +95,13 @@ int App::run(const cli::Options &options)
             qApp->setProperty(kQuittingProperty, true);
             return QStringLiteral("ok");
         }
-        if (verb == QLatin1String("backup") || verb == QLatin1String("stats"))
+        if (verb == QLatin1String("backup")) {
+            profile.page()->setLifecycleState(QWebEnginePage::LifecycleState::Discarded);
+            qApp->setProperty(kQuittingProperty, true);
+            QTimer::singleShot(0, qApp, &QCoreApplication::quit);
+            return QStringLiteral("ok stopping");
+        }
+        if (verb == QLatin1String("stats"))
             return QStringLiteral("err not implemented");
         return QStringLiteral("err unknown verb");
     });
@@ -104,6 +111,10 @@ int App::run(const cli::Options &options)
         profile.page()->triggerAction(QWebEnginePage::Reload);
     });
     connect(&tray, &Tray::quitRequested, this, [] { requestQuit(); });
+    connect(&tray, &Tray::backupRequested, this, [] {
+        QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                {QStringLiteral("--backup")});
+    });
     connect(&window, &Window::hiddenToTray, &tray, [] {});
 
     Notifier notifier;

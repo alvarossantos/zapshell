@@ -8,6 +8,7 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core DBus Widgets WebEngineWidgets WebChannel Test)
 
 add_library(zapshell_core STATIC
+    src/backup.cpp
     src/cli.cpp
     src/instance.cpp
     src/notify.cpp
