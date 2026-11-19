@@ -1,0 +1,6 @@
+[Unit]
+Description=Backup do perfil zapshell
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zapshell --backup

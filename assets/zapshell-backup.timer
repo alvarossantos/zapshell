@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup semanal do perfil zapshell
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+Unit=zapshell-backup.service
+
+[Install]
+WantedBy=timers.target
