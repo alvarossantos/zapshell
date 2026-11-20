@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=zapshell
+GenericName=WhatsApp Web
+Comment=WhatsApp Web nativo em Qt6, com tray e notificacoes
+Exec=zapshell
+Icon=zapshell
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupNotify=false

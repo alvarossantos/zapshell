@@ -1,0 +1,12 @@
+[Unit]
+Description=zapshell — WhatsApp Web em segundo plano
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/zapshell --hidden
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

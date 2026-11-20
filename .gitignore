@@ -1,0 +1,6 @@
+.superpowers/
+build/
+# Artefatos do makepkg (o srcdir cai dentro de src/ por padrão)
+/pkg/
+/src/zapshell-*/
+/*.pkg.tar.zst
