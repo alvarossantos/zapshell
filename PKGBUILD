@@ -30,6 +30,8 @@ package() {
         "$pkgdir/usr/share/applications/zapshell.desktop"
     install -Dm644 "$srcdir/$pkgname-$pkgver/assets/zapshell.svg" \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/zapshell.svg"
+    install -Dm644 "$srcdir/$pkgname-$pkgver/assets/zapshell-tray.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/zapshell-tray.svg"
 
     for unit in zapshell.service zapshell-backup.service zapshell-backup.timer; do
         install -Dm644 "$srcdir/$pkgname-$pkgver/assets/$unit" \

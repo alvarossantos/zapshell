@@ -23,10 +23,18 @@ assert root.findall('.//{*}text') == []
 assert len(root.findall('.//{*}path')) >= 4
 PY
 
-python3 - "$script_dir/../src/tray.cpp" <<'PY'
+python3 - "$script_dir/../assets/zapshell-tray.svg" "$script_dir/../src/tray.cpp" "$script_dir/../PKGBUILD" <<'PY'
 import sys
-source = open(sys.argv[1], encoding='utf-8').read()
-assert 'fromTheme(QStringLiteral("zapshell"))' in source, 'tray não usa o ícone zapshell'
+import xml.etree.ElementTree as ET
+
+tray_svg, tray_cpp, pkgbuild = sys.argv[1:4]
+root = ET.parse(tray_svg).getroot()
+assert root.find('{*}rect') is None, 'ícone da bandeja não deve ter fundo'
+assert root.get('viewBox') == '6 3 52 52', root.get('viewBox')
+colors = {(e.get(a) or '').lower() for e in root.iter() for a in ('fill', 'stroke')}
+assert {'#25d366', '#ffffff', '#ffd54f'} <= colors, colors
+assert 'fromTheme(QStringLiteral("zapshell-tray"))' in open(tray_cpp, encoding='utf-8').read()
+assert 'zapshell-tray.svg' in open(pkgbuild, encoding='utf-8').read()
 PY
 
 tmp=$(mktemp -d)
