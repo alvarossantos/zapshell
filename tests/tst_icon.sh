@@ -23,6 +23,12 @@ assert root.findall('.//{*}text') == []
 assert len(root.findall('.//{*}path')) >= 4
 PY
 
+python3 - "$script_dir/../src/tray.cpp" <<'PY'
+import sys
+source = open(sys.argv[1], encoding='utf-8').read()
+assert 'fromTheme(QStringLiteral("zapshell"))' in source, 'tray não usa o ícone zapshell'
+PY
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 for size in 32 48 128; do

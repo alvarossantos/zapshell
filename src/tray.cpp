@@ -11,7 +11,7 @@ namespace zs {
 Tray::Tray(QObject *parent)
     : QObject(parent)
 {
-    QIcon icon = QIcon::fromTheme(QStringLiteral("internet-chat"));
+    QIcon icon = QIcon::fromTheme(QStringLiteral("zapshell"));
     if (icon.isNull())
         icon = QIcon::fromTheme(QStringLiteral("dialog-information"));
     if (icon.isNull())
