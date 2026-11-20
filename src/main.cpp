@@ -8,23 +8,10 @@
 #include <QApplication>
 #include <QByteArray>
 #include <QDateTime>
-#include <QElapsedTimer>
-#include <QFile>
 #include <QProcess>
 #include <QTextStream>
-#include <QThread>
 
 namespace {
-
-void waitUntilStopped(const QString &socketPath, int timeoutMs)
-{
-    QElapsedTimer timer;
-    timer.start();
-    while (QFile::exists(socketPath) && timer.elapsed() < timeoutMs) {
-        QThread::msleep(100);
-        QCoreApplication::processEvents();
-    }
-}
 
 int backupFlow()
 {
@@ -38,7 +25,11 @@ int backupFlow()
         QTextStream(stdout) << reply << Qt::endl;
         if (!reply.startsWith(QLatin1String("ok")))
             return 1;
-        waitUntilStopped(socket, 15000);
+        if (!zs::InstanceLock::waitUntilReleased(socket, 15000)) {
+            QTextStream(stderr) << "zapshell: instância não encerrou a tempo; backup abortado"
+                                << Qt::endl;
+            return 1; // app ainda vive — não relançar
+        }
     }
 
     QString archive;

@@ -34,6 +34,10 @@ public:
     // Envia um verbo para a instância dona. Bloqueia até a resposta ou timeout.
     bool send(const QString &verb, QString *reply = nullptr, int timeoutMs = 1500);
 
+    // Espera até o socket ser liberado. Falso se o timeout vencer — chamadores
+    // que dependem do app parado devem abortar, não seguir em frente.
+    static bool waitUntilReleased(const QString &socketPath, int timeoutMs);
+
     void setHandler(std::function<QString(const QString &verb)> handler);
 
 private:

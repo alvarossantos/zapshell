@@ -3,8 +3,10 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFile>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QThread>
 
 namespace zs {
 
@@ -48,6 +50,17 @@ bool InstanceLock::acquire(QString *error)
         connect(m_server, &QLocalServer::newConnection, this, &InstanceLock::handleConnection);
     }
     return true;
+}
+
+bool InstanceLock::waitUntilReleased(const QString &socketPath, int timeoutMs)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (QFile::exists(socketPath) && timer.elapsed() < timeoutMs) {
+        QThread::msleep(100);
+        QCoreApplication::processEvents();
+    }
+    return !QFile::exists(socketPath);
 }
 
 void InstanceLock::setHandler(std::function<QString(const QString &)> handler)

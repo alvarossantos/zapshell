@@ -13,6 +13,7 @@ add_dependencies(tst_cli zapshell)
 
 zs_test(tst_web)
 zs_test(tst_instance)
+target_link_libraries(tst_instance PRIVATE Qt6::Network)
 zs_test(tst_notify)
 zs_test(tst_backup)
 zs_test(tst_stats)

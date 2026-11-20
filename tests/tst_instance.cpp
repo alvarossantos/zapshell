@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QFile>
+#include <QLocalServer>
 #include <QTemporaryDir>
 
 #include <sys/socket.h>
@@ -20,6 +21,7 @@ private slots:
     void secondInstanceSendsVerbToFirst();
     void unknownVerbIsRejected();
     void staleSocketIsReclaimed();
+    void waitReportsWhetherSocketWasReleased();
 };
 
 void TestInstance::secondInstanceSendsVerbToFirst()
@@ -88,6 +90,20 @@ void TestInstance::staleSocketIsReclaimed()
     zs::InstanceLock next(socketPath);
     QString error;
     QVERIFY2(next.acquire(&error), qPrintable(error));
+}
+
+void TestInstance::waitReportsWhetherSocketWasReleased()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+
+    QLocalServer server;
+    QVERIFY(server.listen(socketPath));
+    QVERIFY(!zs::InstanceLock::waitUntilReleased(socketPath, 150));
+
+    server.close();
+    QLocalServer::removeServer(socketPath);
+    QVERIFY(zs::InstanceLock::waitUntilReleased(socketPath, 150));
 }
 
 QTEST_GUILESS_MAIN(TestInstance)
