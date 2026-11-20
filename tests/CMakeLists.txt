@@ -16,3 +16,5 @@ zs_test(tst_instance)
 zs_test(tst_notify)
 zs_test(tst_backup)
 zs_test(tst_stats)
+
+add_test(NAME tst_icon COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tst_icon.sh)
