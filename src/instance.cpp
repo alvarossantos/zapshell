@@ -72,6 +72,12 @@ void InstanceLock::handleConnection()
 {
     while (QLocalSocket *socket = m_server->nextPendingConnection()) {
         connect(socket, &QLocalSocket::readyRead, socket, [this, socket]() {
+            // Verbos são curtos; não deixar um cliente local inflar o buffer
+            // indefinidamente enquanto espera um '\n' que nunca vem.
+            if (socket->bytesAvailable() > 1024) {
+                socket->disconnectFromServer();
+                return;
+            }
             if (!socket->canReadLine())
                 return;
             const QString verb = QString::fromUtf8(socket->readLine()).trimmed();

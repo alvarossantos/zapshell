@@ -2,6 +2,7 @@
 
 #include <QFile>
 #include <QLocalServer>
+#include <QLocalSocket>
 #include <QTemporaryDir>
 
 #include <sys/socket.h>
@@ -22,6 +23,7 @@ private slots:
     void unknownVerbIsRejected();
     void staleSocketIsReclaimed();
     void waitReportsWhetherSocketWasReleased();
+    void oversizedLineIsDropped();
 };
 
 void TestInstance::secondInstanceSendsVerbToFirst()
@@ -104,6 +106,29 @@ void TestInstance::waitReportsWhetherSocketWasReleased()
     server.close();
     QLocalServer::removeServer(socketPath);
     QVERIFY(zs::InstanceLock::waitUntilReleased(socketPath, 150));
+}
+
+void TestInstance::oversizedLineIsDropped()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+
+    zs::InstanceLock first(socketPath);
+    int calls = 0;
+    first.setHandler([&calls](const QString &) {
+        ++calls;
+        return QStringLiteral("ok");
+    });
+    QVERIFY(first.acquire());
+
+    QLocalSocket client;
+    client.connectToServer(socketPath);
+    QVERIFY(client.waitForConnected(1000));
+    client.write(QByteArray(8192, 'x'));
+    client.flush();
+
+    QTRY_COMPARE_WITH_TIMEOUT(client.state(), QLocalSocket::UnconnectedState, 2000);
+    QCOMPARE(calls, 0);
 }
 
 QTEST_GUILESS_MAIN(TestInstance)
