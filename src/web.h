@@ -12,6 +12,10 @@ QString chromiumFlags(const QString &overrides);
 // tratar o cliente como navegador não suportado.
 QString normalizeUserAgent(QString userAgent);
 
+// Nome final de um download: evita sobrescrita e mantém o arquivo dentro de
+// `directory`, mesmo quando o nome vem da página.
+QString uniqueFileName(const QString &directory, const QString &fileName);
+
 // Origem exata (`scheme://host[:port]`) do WhatsApp Web.
 bool trustedOrigin(const QString &origin);
 

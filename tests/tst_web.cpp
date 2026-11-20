@@ -1,5 +1,9 @@
 #include <QtTest>
 
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+
 #include "web.h"
 #include "webfeatures.h"
 
@@ -14,6 +18,8 @@ private slots:
     void whatsappGetsMicButOthersDoNot();
     void grantsNotificationsOnlyForWhatsapp();
     void trustedOriginIsExact();
+    void downloadNameCannotEscapeDirectory();
+    void downloadNameAvoidsCollision();
 };
 
 void TestWeb::flagsHaveBudgetDefaults()
@@ -62,6 +68,34 @@ void TestWeb::trustedOriginIsExact()
     QVERIFY(zs::web::trustedOrigin(QStringLiteral("https://web.whatsapp.com")));
     QVERIFY(!zs::web::trustedOrigin(QStringLiteral("https://web.whatsapp.com/")));
     QVERIFY(!zs::web::trustedOrigin(QStringLiteral("https://evil.example")));
+}
+
+void TestWeb::downloadNameCannotEscapeDirectory()
+{
+    const QString dir = QDir::cleanPath(QDir::tempPath() + "/zapshell-downloads");
+    const QStringList names = {
+        QStringLiteral("../../etc/passwd"), QStringLiteral("/etc/passwd"),
+        QStringLiteral(".."),               QStringLiteral("."),
+        QStringLiteral("a/../../b"),        QStringLiteral("..\\..\\secret"),
+    };
+    for (const QString &name : names) {
+        const QString safe = zs::web::uniqueFileName(dir, name);
+        const QString target = QDir::cleanPath(dir + QLatin1Char('/') + safe);
+        QVERIFY2(target.startsWith(dir + QLatin1Char('/')),
+                 qPrintable(name + QStringLiteral(" -> ") + target));
+    }
+}
+
+void TestWeb::downloadNameAvoidsCollision()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QFile existing(dir.path() + QStringLiteral("/foto.jpg"));
+    QVERIFY(existing.open(QIODevice::WriteOnly));
+    existing.close();
+
+    QCOMPARE(zs::web::uniqueFileName(dir.path(), QStringLiteral("foto.jpg")),
+             QStringLiteral("foto (1).jpg"));
 }
 
 QTEST_GUILESS_MAIN(TestWeb)

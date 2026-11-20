@@ -26,18 +26,6 @@ QString originOf(const QUrl &url)
     return origin;
 }
 
-QString uniqueFileName(const QString &directory, const QString &fileName)
-{
-    const QFileInfo info(fileName);
-    const QString base = info.completeBaseName();
-    const QString suffix = info.suffix().isEmpty() ? QString() : "." + info.suffix();
-
-    QString candidate = fileName;
-    for (int i = 1; QFileInfo::exists(directory + "/" + candidate); ++i)
-        candidate = base + " (" + QString::number(i) + ")" + suffix;
-    return candidate;
-}
-
 } // namespace
 
 Profile::Profile(QObject *parent)
@@ -109,7 +97,7 @@ void Profile::onDownloadRequested(QWebEngineDownloadRequest *download)
     QDir().mkpath(directory);
 
     download->setDownloadDirectory(directory);
-    download->setDownloadFileName(uniqueFileName(directory, download->downloadFileName()));
+    download->setDownloadFileName(web::uniqueFileName(directory, download->downloadFileName()));
     connect(download, &QWebEngineDownloadRequest::isFinishedChanged, this,
             [this, download] {
                 if (download->isFinished())

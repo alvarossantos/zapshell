@@ -2,6 +2,7 @@
 
 #include "webfeatures.h"
 
+#include <QFileInfo>
 #include <QRegularExpression>
 
 #include <QWebEnginePage>
@@ -47,6 +48,23 @@ QString normalizeUserAgent(QString userAgent)
     userAgent.remove(QRegularExpression(QStringLiteral("QtWebEngine/[\\d.]+")));
     userAgent.remove(QRegularExpression(QStringLiteral("Qt/[\\d.]+")));
     return userAgent.simplified();
+}
+
+QString uniqueFileName(const QString &directory, const QString &fileName)
+{
+    QString name = QFileInfo(fileName).fileName();
+    if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String("..")
+        || name.contains(QLatin1Char('\\')))
+        name = QStringLiteral("download");
+
+    const QFileInfo info(name);
+    const QString base = info.completeBaseName();
+    const QString suffix = info.suffix().isEmpty() ? QString() : "." + info.suffix();
+
+    QString candidate = name;
+    for (int i = 1; QFileInfo::exists(directory + "/" + candidate); ++i)
+        candidate = base + " (" + QString::number(i) + ")" + suffix;
+    return candidate;
 }
 
 bool trustedOrigin(const QString &origin)
