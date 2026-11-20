@@ -4,3 +4,5 @@ build/
 /pkg/
 /src/zapshell-*/
 /*.pkg.tar.zst
+
+.worktrees/
