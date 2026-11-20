@@ -46,7 +46,7 @@ void Window::showAndRaise()
 
 void Window::toggle()
 {
-    if (isVisible() && isActiveWindow())
+    if (isVisible())
         hide();
     else
         showAndRaise();

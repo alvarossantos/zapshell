@@ -18,3 +18,8 @@ zs_test(tst_backup)
 zs_test(tst_stats)
 
 add_test(NAME tst_icon COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tst_icon.sh)
+
+add_executable(tst_tray_toggle tst_tray_toggle.cpp)
+target_link_libraries(tst_tray_toggle PRIVATE zapshell_ui Qt6::Widgets Qt6::Test)
+add_test(NAME tst_tray_toggle COMMAND tst_tray_toggle)
+set_tests_properties(tst_tray_toggle PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
