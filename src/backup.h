@@ -24,6 +24,10 @@ bool snapshotArchive(const QString &source, const QString &destination, QString 
 bool restorePreviousProfile(const QString &displaced, const QString &profileDir,
                             bool hadProfile, QString *error);
 
+// Defesa extra: valida o que realmente foi escrito no staging, além da
+// validação textual da listagem do tar (que continua rejeitando l/h/devices).
+bool validateStagedProfile(const QString &stagingPath, const QString &name, QString *error);
+
 // Valida o archive antes de tocar no perfil atual. Em caso de falha, o perfil
 // atual fica intacto; em caso de sucesso ele é guardado como .before-restore-*.
 bool restoreBackup(const QString &archive, const QString &profileDir, QString *error);

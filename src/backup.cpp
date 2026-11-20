@@ -1,6 +1,7 @@
 #include "backup.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -112,6 +113,34 @@ bool restorePreviousProfile(const QString &displaced, const QString &profileDir,
     return true;
 }
 
+bool validateStagedProfile(const QString &stagingPath, const QString &name, QString *error)
+{
+    const QString root = stagingPath + "/" + name;
+    const QFileInfo rootInfo(root);
+    if (!rootInfo.isDir() || rootInfo.isSymLink()) {
+        if (error)
+            *error = QStringLiteral("archive não contém ") + name + "/";
+        return false;
+    }
+
+    QDirIterator it(root, QDir::AllEntries | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString path = it.next();
+        const QFileInfo info(path);
+        const QString relative = QDir(root).relativeFilePath(path);
+        if (relative == QLatin1String("."))
+            continue;
+        if (relative.startsWith(QLatin1String("..")) || info.isSymLink()
+            || (!info.isFile() && !info.isDir())) {
+            if (error)
+                *error = QStringLiteral("membro inseguro no archive: ") + relative;
+            return false;
+        }
+    }
+    return true;
+}
+
 bool restoreBackup(const QString &archive, const QString &profileDir, QString *error)
 {
     const QFileInfo info(profileDir);
@@ -163,11 +192,8 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
                 error)) {
         return false;
     }
-    if (!QFileInfo(staging.path() + "/" + name).isDir()) {
-        if (error)
-            *error = QStringLiteral("archive não contém ") + prefix;
+    if (!validateStagedProfile(staging.path(), name, error))
         return false;
-    }
 
     const QString displaced =
         profileDir + QStringLiteral(".before-restore-")

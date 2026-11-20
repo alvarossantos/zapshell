@@ -22,6 +22,8 @@ private slots:
     void snapshotKeepsBytesAfterSourceChanges();
     void failedRollbackIsReported();
     void successfulRollbackRestoresPreviousProfile();
+    void stagedSymlinkIsRejected();
+    void stagedProfileIsAccepted();
 };
 
 void TestBackup::keepsNewestFour()
@@ -184,6 +186,36 @@ void TestBackup::successfulRollbackRestoresPreviousProfile()
     QVERIFY2(zs::restorePreviousProfile(previous, profile, true, &error), qPrintable(error));
     QVERIFY(QFileInfo::exists(profile + "/marker.txt"));
     QVERIFY(!QFileInfo::exists(previous));
+}
+
+void TestBackup::stagedSymlinkIsRejected()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString root = dir.path() + "/profile";
+    QVERIFY(QDir().mkpath(root));
+    QVERIFY(QFile::link(QStringLiteral("/etc/passwd"), root + "/link"));
+
+    QString error;
+    QVERIFY(!zs::validateStagedProfile(dir.path(), QStringLiteral("profile"), &error));
+    QVERIFY(error.contains(QStringLiteral("link")));
+}
+
+void TestBackup::stagedProfileIsAccepted()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString root = dir.path() + "/profile";
+    QVERIFY(QDir().mkpath(root + "/sub"));
+
+    QFile marker(root + "/sub/marker.txt");
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("ok");
+    marker.close();
+
+    QString error;
+    QVERIFY2(zs::validateStagedProfile(dir.path(), QStringLiteral("profile"), &error),
+             qPrintable(error));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)
