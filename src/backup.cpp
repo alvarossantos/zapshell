@@ -90,6 +90,16 @@ bool createBackup(const QString &profileDir, const QString &backupDir, const QDa
     return true;
 }
 
+bool snapshotArchive(const QString &source, const QString &destination, QString *error)
+{
+    if (!QFile::copy(source, destination)) {
+        if (error)
+            *error = QStringLiteral("não foi possível copiar o archive: ") + source;
+        return false;
+    }
+    return true;
+}
+
 bool restoreBackup(const QString &archive, const QString &profileDir, QString *error)
 {
     const QFileInfo info(profileDir);
@@ -97,14 +107,25 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
     const QString prefix = name + "/";
     QDir().mkpath(info.absolutePath());
 
+    QTemporaryDir staging(info.absolutePath() + "/.zapshell-restore-XXXXXX");
+    if (!staging.isValid()) {
+        if (error)
+            *error = QStringLiteral("não foi possível criar diretório temporário");
+        return false;
+    }
+
+    const QString snapshot = staging.path() + "/archive.tar.gz";
+    if (!snapshotArchive(archive, snapshot, error))
+        return false;
+
     QStringList names;
     QByteArray output;
-    if (!runTar({QStringLiteral("-tzf"), archive}, error, &output))
+    if (!runTar({QStringLiteral("-tzf"), snapshot}, error, &output))
         return false;
     names = tarLines(output);
 
     QByteArray verbose;
-    if (!runTar({QStringLiteral("-tvzf"), archive}, error, &verbose))
+    if (!runTar({QStringLiteral("-tvzf"), snapshot}, error, &verbose))
         return false;
     const QStringList types = tarLines(verbose);
     if (types.size() != names.size()) {
@@ -125,15 +146,8 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
         }
     }
 
-    QTemporaryDir staging(info.absolutePath() + "/.zapshell-restore-XXXXXX");
-    if (!staging.isValid()) {
-        if (error)
-            *error = QStringLiteral("não foi possível criar diretório temporário");
-        return false;
-    }
-
     if (!runTar({QStringLiteral("--no-same-owner"), QStringLiteral("--no-same-permissions"),
-                 QStringLiteral("-xzf"), archive, QStringLiteral("-C"), staging.path()},
+                 QStringLiteral("-xzf"), snapshot, QStringLiteral("-C"), staging.path()},
                 error)) {
         return false;
     }

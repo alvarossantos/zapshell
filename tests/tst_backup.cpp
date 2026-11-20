@@ -19,6 +19,7 @@ private slots:
     void createAndRestoreRoundTrip();
     void refusesPathTraversal();
     void restoresWhenProfileIsMissing();
+    void snapshotKeepsBytesAfterSourceChanges();
 };
 
 void TestBackup::keepsNewestFour()
@@ -122,6 +123,31 @@ void TestBackup::restoresWhenProfileIsMissing()
     QFile restored(profile + "/history.dat");
     QVERIFY(restored.open(QIODevice::ReadOnly));
     QCOMPARE(restored.readAll(), QByteArray("sobrevivente"));
+}
+
+void TestBackup::snapshotKeepsBytesAfterSourceChanges()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.path() + "/archive.tar.gz";
+    const QString snapshot = dir.path() + "/snapshot.tar.gz";
+
+    QFile original(source);
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    original.write("conteudo original");
+    original.close();
+
+    QString error;
+    QVERIFY2(zs::snapshotArchive(source, snapshot, &error), qPrintable(error));
+
+    QFile changed(source);
+    QVERIFY(changed.open(QIODevice::WriteOnly));
+    changed.write("conteudo trocado");
+    changed.close();
+
+    QFile copy(snapshot);
+    QVERIFY(copy.open(QIODevice::ReadOnly));
+    QCOMPARE(copy.readAll(), QByteArray("conteudo original"));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)
