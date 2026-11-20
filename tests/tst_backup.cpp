@@ -20,6 +20,8 @@ private slots:
     void refusesPathTraversal();
     void restoresWhenProfileIsMissing();
     void snapshotKeepsBytesAfterSourceChanges();
+    void failedRollbackIsReported();
+    void successfulRollbackRestoresPreviousProfile();
 };
 
 void TestBackup::keepsNewestFour()
@@ -148,6 +150,40 @@ void TestBackup::snapshotKeepsBytesAfterSourceChanges()
     QFile copy(snapshot);
     QVERIFY(copy.open(QIODevice::ReadOnly));
     QCOMPARE(copy.readAll(), QByteArray("conteudo original"));
+}
+
+void TestBackup::failedRollbackIsReported()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString previous = dir.path() + "/profile.before-restore";
+    const QString profile = dir.path() + "/profile";
+    QVERIFY(QDir().mkpath(previous));
+    QVERIFY(QDir().mkpath(profile + "/bloqueio")); // destino não vazio: rename falha
+
+    QString error;
+    QVERIFY(!zs::restorePreviousProfile(previous, profile, true, &error));
+    QVERIFY2(error.contains(previous), qPrintable(error));
+    QVERIFY(QFileInfo::exists(previous));
+}
+
+void TestBackup::successfulRollbackRestoresPreviousProfile()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString previous = dir.path() + "/profile.before-restore";
+    const QString profile = dir.path() + "/profile";
+    QVERIFY(QDir().mkpath(previous));
+
+    QFile marker(previous + "/marker.txt");
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("ok");
+    marker.close();
+
+    QString error;
+    QVERIFY2(zs::restorePreviousProfile(previous, profile, true, &error), qPrintable(error));
+    QVERIFY(QFileInfo::exists(profile + "/marker.txt"));
+    QVERIFY(!QFileInfo::exists(previous));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)

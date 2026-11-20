@@ -19,6 +19,11 @@ bool createBackup(const QString &profileDir, const QString &backupDir, const QDa
 // mesmo que o arquivo de origem seja trocado no meio do restore.
 bool snapshotArchive(const QString &source, const QString &destination, QString *error);
 
+// Devolve o perfil anterior quando a instalação do restaurado falha. `false`
+// com `error` contendo o caminho preservado se a devolução também falhar.
+bool restorePreviousProfile(const QString &displaced, const QString &profileDir,
+                            bool hadProfile, QString *error);
+
 // Valida o archive antes de tocar no perfil atual. Em caso de falha, o perfil
 // atual fica intacto; em caso de sucesso ele é guardado como .before-restore-*.
 bool restoreBackup(const QString &archive, const QString &profileDir, QString *error);

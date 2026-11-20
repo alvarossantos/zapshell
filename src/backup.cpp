@@ -100,6 +100,18 @@ bool snapshotArchive(const QString &source, const QString &destination, QString 
     return true;
 }
 
+bool restorePreviousProfile(const QString &displaced, const QString &profileDir,
+                            bool hadProfile, QString *error)
+{
+    if (hadProfile && !QFile::rename(displaced, profileDir)) {
+        if (error)
+            *error = QStringLiteral("falha ao instalar o perfil e ao devolver o anterior: ")
+                     + displaced;
+        return false;
+    }
+    return true;
+}
+
 bool restoreBackup(const QString &archive, const QString &profileDir, QString *error)
 {
     const QFileInfo info(profileDir);
@@ -167,10 +179,13 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
         return false;
     }
     if (!QFile::rename(staging.path() + "/" + name, profileDir)) {
-        if (hadProfile)
-            QFile::rename(displaced, profileDir);
+        if (!restorePreviousProfile(displaced, profileDir, hadProfile, error))
+            return false;
         if (error)
-            *error = QStringLiteral("não foi possível instalar o perfil restaurado");
+            *error = hadProfile
+                         ? QStringLiteral("não foi possível instalar o perfil restaurado; anterior em ")
+                               + displaced
+                         : QStringLiteral("não foi possível instalar o perfil restaurado");
         return false;
     }
     return true;
