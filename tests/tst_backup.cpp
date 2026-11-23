@@ -26,6 +26,7 @@ private slots:
     void stagedProfileIsAccepted();
     void twoRestoresInSameSecondKeepBothPreviousProfiles();
     void hiddenSymlinkIsRejected();
+    void stalePartialIsNotLeftBehind();
 };
 
 void TestBackup::keepsNewestFour()
@@ -259,6 +260,34 @@ void TestBackup::hiddenSymlinkIsRejected()
     QString error;
     QVERIFY(!zs::validateStagedProfile(dir.path(), QStringLiteral("profile"), &error));
     QVERIFY(error.contains(QStringLiteral(".oculto")));
+}
+
+void TestBackup::stalePartialIsNotLeftBehind()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString profile = dir.path() + "/profile";
+    const QString backups = dir.path() + "/backups";
+    QVERIFY(QDir().mkpath(profile));
+    QVERIFY(QDir().mkpath(backups));
+
+    QFile marker(profile + "/marker.txt");
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("ok");
+    marker.close();
+
+    const QDateTime now(QDate(2026, 11, 23), QTime(20, 50, 0));
+    const QString archive = backups + "/" + zs::backupName(now);
+    QFile stale(archive + QStringLiteral(".partial"));
+    QVERIFY(stale.open(QIODevice::WriteOnly));
+    stale.write("resto de tentativa anterior");
+    stale.close();
+
+    QString out;
+    QString error;
+    QVERIFY2(zs::createBackup(profile, backups, now, &out, &error), qPrintable(error));
+    QVERIFY(QFile::exists(archive));
+    QVERIFY(!QFile::exists(archive + QStringLiteral(".partial")));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)

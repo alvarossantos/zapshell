@@ -73,9 +73,25 @@ bool createBackup(const QString &profileDir, const QString &backupDir, const QDa
     }
 
     const QString archive = backupDir + "/" + backupName(now);
-    if (!runTar({QStringLiteral("-czf"), archive, QStringLiteral("-C"), info.absolutePath(),
+    const QString partial = archive + QStringLiteral(".partial");
+    if (!runTar({QStringLiteral("-czf"), partial, QStringLiteral("-C"), info.absolutePath(),
                  info.fileName()},
-                error)) {
+                error)
+        || !runTar({QStringLiteral("-tzf"), partial}, error)) {
+        QFile::remove(partial);
+        return false;
+    }
+    // Só trocar o definitivo depois que o temporário passou na validação.
+    if (QFile::exists(archive) && !QFile::remove(archive)) {
+        if (error)
+            *error = QStringLiteral("não foi possível substituir ") + archive;
+        QFile::remove(partial);
+        return false;
+    }
+    if (!QFile::rename(partial, archive)) {
+        if (error)
+            *error = QStringLiteral("não foi possível finalizar ") + archive;
+        QFile::remove(partial);
         return false;
     }
 
