@@ -25,6 +25,7 @@ private slots:
     void waitReportsWhetherSocketWasReleased();
     void oversizedLineIsDropped();
     void doesNotDeleteRegularFileAtSocketPath();
+    void idleConnectionIsClosed();
 };
 
 void TestInstance::secondInstanceSendsVerbToFirst()
@@ -151,6 +152,26 @@ void TestInstance::doesNotDeleteRegularFileAtSocketPath()
     QFile check(socketPath);
     QVERIFY(check.open(QIODevice::ReadOnly));
     QCOMPARE(check.readAll(), QByteArray("importante"));
+}
+
+void TestInstance::idleConnectionIsClosed()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+
+    zs::InstanceLock first(socketPath);
+    int calls = 0;
+    first.setHandler([&calls](const QString &) {
+        ++calls;
+        return QStringLiteral("ok");
+    });
+    QVERIFY(first.acquire());
+
+    QLocalSocket client;
+    client.connectToServer(socketPath);
+    QVERIFY(client.waitForConnected(1000));
+    QTRY_COMPARE_WITH_TIMEOUT(client.state(), QLocalSocket::UnconnectedState, 3500);
+    QCOMPARE(calls, 0);
 }
 
 QTEST_GUILESS_MAIN(TestInstance)

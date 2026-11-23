@@ -7,6 +7,7 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QThread>
+#include <QTimer>
 
 #include <sys/stat.h>
 
@@ -85,6 +86,8 @@ void InstanceLock::setHandler(std::function<QString(const QString &)> handler)
 void InstanceLock::handleConnection()
 {
     while (QLocalSocket *socket = m_server->nextPendingConnection()) {
+        // Cliente que conecta e nunca envia o '\n' não pode segurar a vaga.
+        QTimer::singleShot(2000, socket, [socket]() { socket->disconnectFromServer(); });
         connect(socket, &QLocalSocket::readyRead, socket, [this, socket]() {
             // Verbos são curtos; não deixar um cliente local inflar o buffer
             // indefinidamente enquanto espera um '\n' que nunca vem.
