@@ -141,7 +141,8 @@ bool validateStagedProfile(const QString &stagingPath, const QString &name, QStr
     return true;
 }
 
-bool restoreBackup(const QString &archive, const QString &profileDir, QString *error)
+bool restoreBackup(const QString &archive, const QString &profileDir, QString *error,
+                   const QDateTime &now)
 {
     const QFileInfo info(profileDir);
     const QString name = info.fileName();
@@ -197,7 +198,7 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
 
     const QString displaced =
         profileDir + QStringLiteral(".before-restore-")
-        + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        + now.toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
     const bool hadProfile = info.isDir();
     if (hadProfile && !QFile::rename(profileDir, displaced)) {
         if (error)

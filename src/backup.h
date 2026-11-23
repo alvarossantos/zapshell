@@ -30,6 +30,7 @@ bool validateStagedProfile(const QString &stagingPath, const QString &name, QStr
 
 // Valida o archive antes de tocar no perfil atual. Em caso de falha, o perfil
 // atual fica intacto; em caso de sucesso ele é guardado como .before-restore-*.
-bool restoreBackup(const QString &archive, const QString &profileDir, QString *error);
+bool restoreBackup(const QString &archive, const QString &profileDir, QString *error,
+                   const QDateTime &now = QDateTime::currentDateTime());
 
 } // namespace zs

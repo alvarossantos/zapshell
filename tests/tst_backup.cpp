@@ -24,6 +24,7 @@ private slots:
     void successfulRollbackRestoresPreviousProfile();
     void stagedSymlinkIsRejected();
     void stagedProfileIsAccepted();
+    void twoRestoresInSameSecondKeepBothPreviousProfiles();
 };
 
 void TestBackup::keepsNewestFour()
@@ -216,6 +217,34 @@ void TestBackup::stagedProfileIsAccepted()
     QString error;
     QVERIFY2(zs::validateStagedProfile(dir.path(), QStringLiteral("profile"), &error),
              qPrintable(error));
+}
+
+void TestBackup::twoRestoresInSameSecondKeepBothPreviousProfiles()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString profile = dir.path() + "/profile";
+    const QString backups = dir.path() + "/backups";
+    QVERIFY(QDir().mkpath(profile));
+
+    QFile original(profile + "/history.dat");
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    original.write("original");
+    original.close();
+
+    QString archive;
+    QString error;
+    const QDateTime backupTime(QDate(2026, 11, 18), QTime(9, 5, 3));
+    QVERIFY2(zs::createBackup(profile, backups, backupTime, &archive, &error), qPrintable(error));
+
+    const QDateTime first(QDate(2026, 11, 23), QTime(20, 31, 20, 100));
+    const QDateTime second(QDate(2026, 11, 23), QTime(20, 31, 20, 900));
+    QVERIFY2(zs::restoreBackup(archive, profile, &error, first), qPrintable(error));
+    QVERIFY2(zs::restoreBackup(archive, profile, &error, second), qPrintable(error));
+
+    const QStringList kept = QDir(dir.path()).entryList(
+        {QStringLiteral("profile.before-restore-*")}, QDir::Dirs);
+    QCOMPARE(kept.size(), 2);
 }
 
 QTEST_GUILESS_MAIN(TestBackup)
