@@ -24,6 +24,7 @@ private slots:
     void staleSocketIsReclaimed();
     void waitReportsWhetherSocketWasReleased();
     void oversizedLineIsDropped();
+    void doesNotDeleteRegularFileAtSocketPath();
 };
 
 void TestInstance::secondInstanceSendsVerbToFirst()
@@ -129,6 +130,27 @@ void TestInstance::oversizedLineIsDropped()
 
     QTRY_COMPARE_WITH_TIMEOUT(client.state(), QLocalSocket::UnconnectedState, 2000);
     QCOMPARE(calls, 0);
+}
+
+void TestInstance::doesNotDeleteRegularFileAtSocketPath()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+
+    QFile victim(socketPath);
+    QVERIFY(victim.open(QIODevice::WriteOnly));
+    victim.write("importante");
+    victim.close();
+
+    zs::InstanceLock lock(socketPath);
+    QString error;
+    QVERIFY2(!lock.acquire(&error),
+             "não deve assumir a posse apagando arquivo regular no caminho do socket");
+    QVERIFY2(QFile::exists(socketPath), "arquivo regular no caminho do socket foi removido");
+
+    QFile check(socketPath);
+    QVERIFY(check.open(QIODevice::ReadOnly));
+    QCOMPARE(check.readAll(), QByteArray("importante"));
 }
 
 QTEST_GUILESS_MAIN(TestInstance)

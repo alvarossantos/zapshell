@@ -8,6 +8,8 @@
 #include <QLocalSocket>
 #include <QThread>
 
+#include <sys/stat.h>
+
 namespace zs {
 
 InstanceLock::InstanceLock(QString socketPath)
@@ -35,7 +37,19 @@ bool InstanceLock::acquire(QString *error)
             return false;
         }
 
-        // Socket órfão de um processo que morreu sem limpar: pode ser removido.
+        // Só reclamar a vaga quando a falha for recusa (socket órfão) ou o
+        // arquivo já ter sumido. Timeout/permissão/arquivo regular podem ser
+        // uma instância viva — remover aqui apagaria a vaga alheia.
+        const bool removable = probe.error() == QLocalSocket::ConnectionRefusedError
+                               || probe.error() == QLocalSocket::ServerNotFoundError;
+        struct stat st{};
+        const bool statOk = ::lstat(QFile::encodeName(m_socketPath).constData(), &st) == 0;
+        const bool socketFile = statOk && S_ISSOCK(st.st_mode);
+        if (!removable || (statOk && !socketFile)) {
+            if (error)
+                *error = QStringLiteral("não foi possível confirmar socket órfão: ") + m_socketPath;
+            return false;
+        }
         QLocalServer::removeServer(m_socketPath);
 
         m_server = new QLocalServer(this);
