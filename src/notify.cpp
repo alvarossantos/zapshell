@@ -8,6 +8,8 @@
 #include <QHash>
 #include <QRegularExpression>
 
+#include <algorithm>
+
 namespace zs {
 namespace {
 
@@ -15,10 +17,23 @@ const char *const kService = "org.freedesktop.Notifications";
 const char *const kPath = "/org/freedesktop/Notifications";
 const char *const kInterface = "org.freedesktop.Notifications";
 
+constexpr int kMaxSeenTitles = 256;
+
 QHash<QString, qint64> &lastSeen()
 {
     static QHash<QString, qint64> seen;
     return seen;
+}
+
+void rememberTitle(const QString &title, qint64 nowMs)
+{
+    QHash<QString, qint64> &seen = lastSeen();
+    if (!seen.contains(title) && seen.size() >= kMaxSeenTitles) {
+        const auto oldest = std::min_element(seen.cbegin(), seen.cend());
+        if (oldest != seen.cend())
+            seen.remove(oldest.key());
+    }
+    seen.insert(title, nowMs);
 }
 
 } // namespace
@@ -28,13 +43,14 @@ NotifyDecision decideNotify(const QString &title, qint64 nowMs, bool silent, qin
     if (silent)
         return NotifyDecision::Drop;
 
-    qint64 &last = lastSeen()[title];
-    if (last != 0 && nowMs - last < groupWindowMs) {
-        last = nowMs;
+    QHash<QString, qint64> &seen = lastSeen();
+    const auto it = seen.constFind(title);
+    if (it != seen.cend() && nowMs - *it < groupWindowMs) {
+        seen[title] = nowMs;
         return NotifyDecision::Group;
     }
 
-    last = nowMs;
+    rememberTitle(title, nowMs);
     return NotifyDecision::Send;
 }
 
