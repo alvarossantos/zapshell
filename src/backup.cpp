@@ -123,7 +123,7 @@ bool validateStagedProfile(const QString &stagingPath, const QString &name, QStr
         return false;
     }
 
-    QDirIterator it(root, QDir::AllEntries | QDir::NoDotAndDotDot,
+    QDirIterator it(root, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
                     QDirIterator::Subdirectories);
     while (it.hasNext()) {
         const QString path = it.next();

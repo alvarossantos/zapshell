@@ -25,6 +25,7 @@ private slots:
     void stagedSymlinkIsRejected();
     void stagedProfileIsAccepted();
     void twoRestoresInSameSecondKeepBothPreviousProfiles();
+    void hiddenSymlinkIsRejected();
 };
 
 void TestBackup::keepsNewestFour()
@@ -245,6 +246,19 @@ void TestBackup::twoRestoresInSameSecondKeepBothPreviousProfiles()
     const QStringList kept = QDir(dir.path()).entryList(
         {QStringLiteral("profile.before-restore-*")}, QDir::Dirs);
     QCOMPARE(kept.size(), 2);
+}
+
+void TestBackup::hiddenSymlinkIsRejected()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString root = dir.path() + "/profile";
+    QVERIFY(QDir().mkpath(root));
+    QVERIFY(QFile::link(QStringLiteral("/etc/passwd"), root + "/.oculto"));
+
+    QString error;
+    QVERIFY(!zs::validateStagedProfile(dir.path(), QStringLiteral("profile"), &error));
+    QVERIFY(error.contains(QStringLiteral(".oculto")));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)
