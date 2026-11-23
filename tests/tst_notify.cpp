@@ -11,6 +11,7 @@ private slots:
     void silentDrops();
     void parsesUnreadBadge();
     void notificationHasDefaultAction();
+    void notificationTextIsEscaped();
 };
 
 void TestNotify::groupsRepeatsWithinWindow()
@@ -35,6 +36,14 @@ void TestNotify::parsesUnreadBadge()
 void TestNotify::notificationHasDefaultAction()
 {
     QVERIFY(zs::notificationActions().contains(QStringLiteral("default")));
+}
+
+void TestNotify::notificationTextIsEscaped()
+{
+    QCOMPARE(zs::escapeNotificationText(QStringLiteral("<b>Ana</b> & <img>")),
+             QStringLiteral("&lt;b&gt;Ana&lt;/b&gt; &amp; &lt;img&gt;"));
+    QCOMPARE(zs::escapeNotificationText(QStringLiteral("texto normal")),
+             QStringLiteral("texto normal"));
 }
 
 QTEST_GUILESS_MAIN(TestNotify)

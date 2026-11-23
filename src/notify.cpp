@@ -50,6 +50,11 @@ QStringList notificationActions()
     return {QStringLiteral("default"), QStringLiteral("Abrir")};
 }
 
+QString escapeNotificationText(const QString &text)
+{
+    return text.toHtmlEscaped();
+}
+
 Notifier::Notifier(QObject *parent)
     : QObject(parent)
 {
@@ -82,8 +87,9 @@ bool Notifier::show(const QString &summary, const QString &body)
         return false;
 
     const QDBusMessage reply =
-        m_interface->call(QStringLiteral("Notify"), QStringLiteral("zapshell"), uint(0),
-                          QString(), summary, body, notificationActions(), QVariantMap(), 5000);
+        m_interface->call(QStringLiteral("Notify"), QStringLiteral("zapshell"), uint(0), QString(),
+                          escapeNotificationText(summary), escapeNotificationText(body),
+                          notificationActions(), QVariantMap(), 5000);
     if (reply.type() == QDBusMessage::ErrorMessage) {
         qWarning() << "zapshell: falha ao notificar:" << reply.errorMessage();
         return false;

@@ -26,6 +26,10 @@ int unreadFromTitle(const QString &title);
 // sem ela, clicar na notificação não abre a janela.
 QStringList notificationActions();
 
+// Título e mensagem vêm da página (Notification API). O daemon interpreta
+// markup limitado, então texto de remetente precisa chegar literal.
+QString escapeNotificationText(const QString &text);
+
 // Notificações nativas via org.freedesktop.Notifications. Best-effort: se o
 // DBus falhar, o chat continua funcionando.
 class Notifier : public QObject
