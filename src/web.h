@@ -23,4 +23,8 @@ bool trustedOrigin(const QString &origin);
 // notificações. Qualquer outra origem ou feature é negada.
 bool permissionGranted(const QString &origin, int feature);
 
+// isFinished() também vale para cancelado/interrompido: anunciar conclusão
+// exige o estado DownloadCompleted.
+bool shouldNotifyDownload(bool finished, bool completed);
+
 } // namespace zs::web

@@ -20,6 +20,7 @@ private slots:
     void trustedOriginIsExact();
     void downloadNameCannotEscapeDirectory();
     void downloadNameAvoidsCollision();
+    void onlyCompletedDownloadsAreReported();
 };
 
 void TestWeb::flagsHaveBudgetDefaults()
@@ -96,6 +97,13 @@ void TestWeb::downloadNameAvoidsCollision()
 
     QCOMPARE(zs::web::uniqueFileName(dir.path(), QStringLiteral("foto.jpg")),
              QStringLiteral("foto (1).jpg"));
+}
+
+void TestWeb::onlyCompletedDownloadsAreReported()
+{
+    QVERIFY(!zs::web::shouldNotifyDownload(false, true)); // ainda em andamento
+    QVERIFY(!zs::web::shouldNotifyDownload(true, false)); // cancelado/interrompido
+    QVERIFY(zs::web::shouldNotifyDownload(true, true));   // concluído
 }
 
 QTEST_GUILESS_MAIN(TestWeb)

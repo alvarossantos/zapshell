@@ -100,7 +100,9 @@ void Profile::onDownloadRequested(QWebEngineDownloadRequest *download)
     download->setDownloadFileName(web::uniqueFileName(directory, download->downloadFileName()));
     connect(download, &QWebEngineDownloadRequest::isFinishedChanged, this,
             [this, download] {
-                if (download->isFinished())
+                const bool completed = download->state()
+                                       == QWebEngineDownloadRequest::DownloadCompleted;
+                if (web::shouldNotifyDownload(download->isFinished(), completed))
                     emit downloadFinished(download->downloadFileName());
             });
     download->accept();

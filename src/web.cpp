@@ -90,4 +90,9 @@ bool permissionGranted(const QString &origin, int feature)
     }
 }
 
+bool shouldNotifyDownload(bool finished, bool completed)
+{
+    return finished && completed;
+}
+
 } // namespace zs::web
