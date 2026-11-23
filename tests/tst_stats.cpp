@@ -11,6 +11,7 @@ private slots:
     void missingVmRssIsZero();
     void formatsStats();
     void selfTreeHasMemory();
+    void cpuPercentUsesElapsedTime();
 };
 
 void TestStats::parsesVmRss()
@@ -32,6 +33,14 @@ void TestStats::formatsStats()
 void TestStats::selfTreeHasMemory()
 {
     QVERIFY(zs::processTreeRssKb(QCoreApplication::applicationPid()) > 0);
+}
+
+void TestStats::cpuPercentUsesElapsedTime()
+{
+    QCOMPARE(zs::cpuPercent(0, 100, 1000, 100.0), 100.0);
+    QCOMPARE(zs::cpuPercent(0, 100, 2000, 100.0), 50.0);
+    QCOMPARE(zs::cpuPercent(50, 50, 1000, 100.0), 0.0);
+    QCOMPARE(zs::cpuPercent(0, 100, 0, 100.0), 0.0);
 }
 
 QTEST_GUILESS_MAIN(TestStats)

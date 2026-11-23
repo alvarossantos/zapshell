@@ -85,6 +85,13 @@ quint64 processTreeJiffies(qint64 rootPid)
     return total;
 }
 
+double cpuPercent(quint64 before, quint64 after, qint64 elapsedMs, double hertz)
+{
+    if (hertz <= 0 || elapsedMs <= 0 || after < before)
+        return 0.0;
+    return double(after - before) / hertz / (double(elapsedMs) / 1000.0) * 100.0;
+}
+
 QString formatStats(quint64 rssKb, double cpuPercent)
 {
     return QStringLiteral("zapshell: %1 MB RSS, %2% CPU")

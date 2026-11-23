@@ -40,9 +40,42 @@ QString sampleStats()
     QThread::msleep(250);
     const quint64 after = processTreeJiffies(pid);
     const double hertz = double(::sysconf(_SC_CLK_TCK));
-    const double cpu = hertz > 0 ? (after - before) / hertz / 0.25 * 100.0 : 0.0;
-    return formatStats(processTreeRssKb(pid), cpu);
+    return formatStats(processTreeRssKb(pid), cpuPercent(before, after, 250, hertz));
 }
+
+// Amostra contínua em segundo plano: o handler IPC só lê o último valor,
+// sem bloquear a thread principal da interface.
+class StatsSampler : public QObject
+{
+public:
+    explicit StatsSampler(QObject *parent = nullptr) : QObject(parent)
+    {
+        m_timer.setInterval(1000);
+        connect(&m_timer, &QTimer::timeout, this, &StatsSampler::sample);
+        m_timer.start();
+        sample();
+    }
+
+    QString latest() const { return m_latest; }
+
+private:
+    void sample()
+    {
+        const qint64 pid = QCoreApplication::applicationPid();
+        const quint64 jiffies = processTreeJiffies(pid);
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        const double hertz = double(::sysconf(_SC_CLK_TCK));
+        const double cpu = m_ms > 0 ? cpuPercent(m_jiffies, jiffies, nowMs - m_ms, hertz) : 0.0;
+        m_latest = formatStats(processTreeRssKb(pid), cpu);
+        m_jiffies = jiffies;
+        m_ms = nowMs;
+    }
+
+    QTimer m_timer;
+    QString m_latest;
+    quint64 m_jiffies = 0;
+    qint64 m_ms = 0;
+};
 
 } // namespace
 
@@ -87,7 +120,7 @@ int App::run(const cli::Options &options)
             QTextStream(stdout) << sampleStats() << Qt::endl;
             return 0;
         }
-        if (verb == QLatin1String("stats") || verb == QLatin1String("backup")) {
+        if (verb == QLatin1String("backup")) {
             QTextStream(stderr) << "zapshell: não há instância em execução" << Qt::endl;
             return 1;
         }
@@ -102,8 +135,9 @@ int App::run(const cli::Options &options)
     Profile profile;
     Window window(profile.page());
     Tray tray;
+    StatsSampler sampler;
 
-    lock.setHandler([&profile, &window](const QString &verb) {
+    lock.setHandler([&profile, &window, &sampler](const QString &verb) {
         if (verb == QLatin1String("show")) {
             window.showAndRaise();
             return QStringLiteral("ok");
@@ -124,7 +158,7 @@ int App::run(const cli::Options &options)
             return QStringLiteral("ok stopping");
         }
         if (verb == QLatin1String("stats"))
-            return QStringLiteral("ok ") + sampleStats();
+            return QStringLiteral("ok ") + sampler.latest();
         return QStringLiteral("err unknown verb");
     });
 
