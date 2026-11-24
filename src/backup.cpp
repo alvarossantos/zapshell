@@ -19,9 +19,21 @@ bool runTar(const QStringList &arguments, QString *error, QByteArray *output = n
 {
     QProcess process;
     process.start(QStringLiteral("tar"), arguments);
-    if (!process.waitForFinished(120000)) {
+    const bool finished = process.waitForFinished(120000);
+    if (process.error() == QProcess::FailedToStart) {
+        if (error)
+            *error = QStringLiteral("não foi possível iniciar tar: ")
+                     + process.errorString();
+        return false;
+    }
+    if (!finished) {
         if (error)
             *error = QStringLiteral("tar excedeu o timeout");
+        return false;
+    }
+    if (process.exitStatus() != QProcess::NormalExit) {
+        if (error)
+            *error = QStringLiteral("tar encerrado por sinal %1").arg(process.exitCode());
         return false;
     }
     if (process.exitCode() != 0) {
