@@ -31,8 +31,9 @@ QString originOf(const QUrl &url)
 Profile::Profile(QObject *parent)
     : QObject(parent)
 {
-    QDir().mkpath(paths::profileDir());
-    QDir().mkpath(paths::cacheDir());
+    paths::ensurePrivateDir(paths::dataDir());
+    paths::ensurePrivateDir(paths::profileDir());
+    paths::ensurePrivateDir(paths::cacheDir());
 
     m_profile = new QWebEngineProfile(QStringLiteral("zapshell"), this);
     m_profile->setPersistentStoragePath(paths::profileDir());

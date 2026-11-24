@@ -15,4 +15,7 @@ QString backupDir();
 // $XDG_RUNTIME_DIR/zapshell.sock
 QString socketPath();
 
+// cria e força modo 0700 (sessão, histórico e mídia são dados privados)
+void ensurePrivateDir(const QString &path);
+
 } // namespace zs::paths

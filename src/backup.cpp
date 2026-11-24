@@ -1,4 +1,5 @@
 #include "backup.h"
+#include "paths.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -70,7 +71,8 @@ bool createBackup(const QString &profileDir, const QString &backupDir, const QDa
             *error = QStringLiteral("perfil não existe: ") + profileDir;
         return false;
     }
-    if (!QDir().mkpath(backupDir)) {
+    paths::ensurePrivateDir(backupDir);
+    if (!QFileInfo(backupDir).isDir()) {
         if (error)
             *error = QStringLiteral("não foi possível criar ") + backupDir;
         return false;
@@ -165,7 +167,7 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
     const QFileInfo info(profileDir);
     const QString name = info.fileName();
     const QString prefix = name + "/";
-    QDir().mkpath(info.absolutePath());
+    paths::ensurePrivateDir(info.absolutePath());
 
     QTemporaryDir staging(info.absolutePath() + "/.zapshell-restore-XXXXXX");
     if (!staging.isValid()) {

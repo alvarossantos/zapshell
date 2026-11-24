@@ -1,6 +1,7 @@
 #include "paths.h"
 
 #include <QDir>
+#include <QFile>
 #include <QStandardPaths>
 
 #include <unistd.h>
@@ -45,6 +46,14 @@ QString socketPath()
 {
     const QString fallback = "/run/user/" + QString::number(::getuid());
     return envOr("XDG_RUNTIME_DIR", fallback) + "/zapshell.sock";
+}
+
+void ensurePrivateDir(const QString &path)
+{
+    if (!QDir().mkpath(path))
+        return;
+    QFile::setPermissions(path,
+                          QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
 }
 
 } // namespace zs::paths
