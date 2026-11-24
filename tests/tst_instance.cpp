@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QElapsedTimer>
 #include <QLocalServer>
@@ -57,6 +58,7 @@ private slots:
     void acquireMaintenanceIsIdempotentForMaintenanceLock();
     void invalidTransitionMaintenanceToAcquirePreservesExclusivity();
     void invalidTransitionAcquireToMaintenancePreservesExclusivity();
+    void fourProcessesSingleOwner();
 };
 
 static void configureChild(QProcess &process, const QString &base)
@@ -782,5 +784,144 @@ void TestInstance::invalidTransitionAcquireToMaintenancePreservesExclusivity()
     QVERIFY(!otherError.isEmpty());
 }
 
-QTEST_GUILESS_MAIN(TestInstance)
+void TestInstance::fourProcessesSingleOwner()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString socketPath = dir.filePath(QStringLiteral("t.sock"));
+    const QString goPath = dir.filePath(QStringLiteral("go"));
+    const QString releasePath = dir.filePath(QStringLiteral("release"));
+    const QString resultDir = dir.filePath(QStringLiteral("results"));
+    QVERIFY(QDir().mkpath(resultDir));
+
+    constexpr int kChildren = 4;
+    std::array<ChildProcess, kChildren> children;
+    const QString self = QCoreApplication::applicationFilePath();
+
+    for (int i = 0; i < kChildren; ++i) {
+        const QString id = QStringLiteral("p%1").arg(i);
+        children[i].setProgram(self);
+        children[i].setArguments({QStringLiteral("--instance-lock-child"),
+                                  socketPath,
+                                  goPath,
+                                  resultDir,
+                                  id,
+                                  releasePath});
+        children[i].start();
+        QVERIFY2(children[i].waitForStarted(3000),
+                 qPrintable(QStringLiteral("child %1 did not start").arg(i)));
+    }
+
+    {
+        QFile go(goPath);
+        QVERIFY(go.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        go.write("go\n");
+        go.close();
+    }
+
+    QElapsedTimer waitResults;
+    waitResults.start();
+    auto resultCount = [&]() {
+        return QDir(resultDir).entryList({QStringLiteral("*.txt")}, QDir::Files).size();
+    };
+    while (resultCount() < kChildren && waitResults.elapsed() < 10000)
+        QTest::qWait(20);
+    QCOMPARE(resultCount(), kChildren);
+
+    int owners = 0;
+    int rejected = 0;
+    for (int i = 0; i < kChildren; ++i) {
+        QFile f(resultDir + QStringLiteral("/p%1.txt").arg(i));
+        QVERIFY2(f.open(QIODevice::ReadOnly),
+                 qPrintable(QStringLiteral("missing result for p%1").arg(i)));
+        const QByteArray body = f.readAll();
+        if (body.startsWith("owner\n"))
+            ++owners;
+        else if (body.startsWith("rejected\n"))
+            ++rejected;
+        else
+            QFAIL(qPrintable(QStringLiteral("unexpected result for p%1: %2")
+                                 .arg(i)
+                                 .arg(QString::fromUtf8(body))));
+    }
+    QCOMPARE(owners, 1);
+    QCOMPARE(rejected, 3);
+
+    {
+        QFile rel(releasePath);
+        QVERIFY(rel.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        rel.write("release\n");
+        rel.close();
+    }
+
+    for (int i = 0; i < kChildren; ++i) {
+        QVERIFY2(children[i].waitForFinished(10000),
+                 qPrintable(QStringLiteral("child %1 did not finish").arg(i)));
+        QCOMPARE(children[i].exitStatus(), QProcess::NormalExit);
+        QCOMPARE(children[i].exitCode(), 0);
+    }
+
+    {
+        zs::InstanceLock probe(socketPath);
+        QString probeError;
+        QVERIFY2(probe.acquireMaintenance(&probeError, 1000), qPrintable(probeError));
+    }
+    {
+        zs::InstanceLock probe(socketPath);
+        QString probeError;
+        QVERIFY2(probe.acquire(&probeError, 1000), qPrintable(probeError));
+    }
+}
+
+static int instanceLockChildMain(const QStringList &args)
+{
+    // args: ... --instance-lock-child <socketPath> <goPath> <resultDir> <id> <releasePath>
+    const int idx = args.indexOf(QStringLiteral("--instance-lock-child"));
+    if (idx < 0 || args.size() < idx + 6)
+        return 2;
+    const QString socketPath = args.at(idx + 1);
+    const QString goPath = args.at(idx + 2);
+    const QString resultDir = args.at(idx + 3);
+    const QString id = args.at(idx + 4);
+    const QString releasePath = args.at(idx + 5);
+
+    QElapsedTimer wait;
+    wait.start();
+    while (!QFile::exists(goPath) && wait.elapsed() < 10000)
+        QThread::msleep(10);
+    if (!QFile::exists(goPath))
+        return 3;
+
+    zs::InstanceLock lock(socketPath);
+    QString error;
+    const bool acquired = lock.acquire(&error, 0);
+
+    QDir().mkpath(resultDir);
+    QFile out(resultDir + QStringLiteral("/") + id + QStringLiteral(".txt"));
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return 4;
+    out.write(acquired ? "owner\n" : "rejected\n");
+    out.write(error.toUtf8());
+    out.write("\n");
+    out.close();
+
+    QElapsedTimer hold;
+    hold.start();
+    while (!QFile::exists(releasePath) && hold.elapsed() < 15000)
+        QThread::msleep(10);
+
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    QCoreApplication app(argc, argv);
+    const QStringList args = app.arguments();
+    if (args.size() > 1 && args.at(1) == QStringLiteral("--instance-lock-child"))
+        return instanceLockChildMain(args);
+
+    TestInstance tc;
+    return QTest::qExec(&tc, argc, argv);
+}
+
 #include "tst_instance.moc"
