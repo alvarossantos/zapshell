@@ -835,10 +835,14 @@ void TestInstance::fourProcessesSingleOwner()
         QVERIFY2(f.open(QIODevice::ReadOnly),
                  qPrintable(QStringLiteral("missing result for p%1").arg(i)));
         const QByteArray body = f.readAll();
-        if (body.startsWith("owner\n"))
+        if (body.startsWith("owner\n")) {
             ++owners;
-        else if (body.startsWith("rejected\n"))
+        } else if (body.startsWith("rejected\n")) {
             ++rejected;
+            const QString err = QString::fromUtf8(body.mid(qstrlen("rejected\n"))).trimmed();
+            QVERIFY2(!err.isEmpty(),
+                     qPrintable(QStringLiteral("rejected result for p%1 missing error").arg(i)));
+        }
         else
             QFAIL(qPrintable(QStringLiteral("unexpected result for p%1: %2")
                                  .arg(i)
@@ -897,13 +901,18 @@ static int instanceLockChildMain(const QStringList &args)
     const bool acquired = lock.acquire(&error, 0);
 
     QDir().mkpath(resultDir);
-    QFile out(resultDir + QStringLiteral("/") + id + QStringLiteral(".txt"));
+    const QString finalPath = resultDir + QStringLiteral("/") + id + QStringLiteral(".txt");
+    const QString tmpPath = finalPath + QStringLiteral(".tmp");
+    QFile out(tmpPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return 4;
     out.write(acquired ? "owner\n" : "rejected\n");
     out.write(error.toUtf8());
     out.write("\n");
     out.close();
+    QFile::remove(finalPath);
+    if (!QFile::rename(tmpPath, finalPath))
+        return 5;
 
     QElapsedTimer hold;
     hold.start();
