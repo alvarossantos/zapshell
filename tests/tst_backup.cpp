@@ -54,6 +54,7 @@ private slots:
     void failedPublishKeepsPreviousArchive();
     void restoredProfileBecomesPrivate();
     void tarCrashIsRejected();
+    void tarFailedToStartIsRejected();
 };
 
 void TestBackup::tarCrashIsRejected()
@@ -102,6 +103,51 @@ void TestBackup::tarCrashIsRejected()
     QVERIFY(!zs::createBackup(profileDir, backupDir, now, &archive, &error));
     QVERIFY(!error.isEmpty());
     QVERIFY2(error.contains(QStringLiteral("sinal")), qPrintable(error));
+    QVERIFY(QDir(backupDir).entryList({QStringLiteral("*.partial")}, QDir::Files).isEmpty());
+}
+
+void TestBackup::tarFailedToStartIsRejected()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString fakeBin = dir.path() + QStringLiteral("/bin");
+    QVERIFY(QDir().mkpath(fakeBin));
+
+    QFile fakeTar(fakeBin + QStringLiteral("/tar"));
+    QVERIFY(fakeTar.open(QIODevice::WriteOnly));
+    fakeTar.close();
+    QVERIFY(fakeTar.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                   | QFileDevice::ReadGroup | QFileDevice::ReadOther));
+
+    ScopedEnvironmentVariable restorePath("PATH");
+    ScopedEnvironmentVariable restoreDataHome("XDG_DATA_HOME");
+    ScopedEnvironmentVariable restoreCacheHome("XDG_CACHE_HOME");
+    ScopedEnvironmentVariable restoreRuntimeDir("XDG_RUNTIME_DIR");
+    qputenv("PATH", QFile::encodeName(fakeBin));
+    qputenv("XDG_DATA_HOME", QFile::encodeName(dir.path() + QStringLiteral("/data")));
+    qputenv("XDG_CACHE_HOME", QFile::encodeName(dir.path() + QStringLiteral("/cache")));
+    qputenv("XDG_RUNTIME_DIR", QFile::encodeName(dir.path() + QStringLiteral("/runtime")));
+    QVERIFY(QDir().mkpath(dir.path() + QStringLiteral("/data")));
+    QVERIFY(QDir().mkpath(dir.path() + QStringLiteral("/cache")));
+    QVERIFY(QDir().mkpath(dir.path() + QStringLiteral("/runtime")));
+    QVERIFY(QFile::setPermissions(dir.path() + QStringLiteral("/runtime"),
+                                  QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                      | QFileDevice::ExeOwner));
+
+    const QString profileDir = dir.path() + QStringLiteral("/profile");
+    const QString backupDir = dir.path() + QStringLiteral("/backups");
+    QVERIFY(QDir().mkpath(profileDir));
+    QFile marker(profileDir + QStringLiteral("/marker.txt"));
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("ok");
+    marker.close();
+
+    QString archive;
+    QString error;
+    const QDateTime now(QDate(2026, 11, 23), QTime(20, 50, 0));
+    QVERIFY(!zs::createBackup(profileDir, backupDir, now, &archive, &error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY2(error.contains(QStringLiteral("iniciar tar")), qPrintable(error));
     QVERIFY(QDir(backupDir).entryList({QStringLiteral("*.partial")}, QDir::Files).isEmpty());
 }
 
