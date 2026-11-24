@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QStandardPaths>
 #include <QFileInfo>
 #include <QElapsedTimer>
 #include <QTest>
@@ -402,102 +403,140 @@ void TestInstance::maintenanceLockBlocksProfileStartup()
 void TestInstance::restoreBlocksProfileStartup()
 {
     // ZS-14: startup concorrente durante restore real que já possui lock.
-    // Usa probe de lock para detectar contenção real; se a janela for curta sob
-    // carga, registra limitação de observabilidade mas mantém invariantes do restore.
+    // Determinístico: wrapper tar no PATH isolado pausa a extração (-xzf) em barreira.
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    QVERIFY(QDir().mkpath(dir.path() + "/runtime"));
-    QVERIFY(QDir().mkpath(dir.path() + "/data/zapshell/profile"));
-    QFile marker(dir.path() + "/data/zapshell/profile/keep");
+    const QString base = dir.path();
+    QVERIFY(QDir().mkpath(base + "/runtime"));
+    QVERIFY(QDir().mkpath(base + "/data/zapshell/profile"));
+    QFile marker(base + "/data/zapshell/profile/keep.txt");
     QVERIFY(marker.open(QIODevice::WriteOnly));
-    marker.write("untouched");
+    marker.write("original");
     marker.close();
 
-    QDir payload(dir.path() + "/data/zapshell/profile/payload");
-    QVERIFY(payload.mkpath(QStringLiteral(".")));
-    for (int i = 0; i < 8; ++i) {
-        QFile f(payload.filePath(QStringLiteral("f%1.bin").arg(i)));
-        QVERIFY(f.open(QIODevice::WriteOnly));
-        f.write(QByteArray(64 * 1024, char('a' + (i % 26))));
-    }
-
-    const QString archive = dir.path() + "/valid.tar.gz";
+    const QString archive = base + "/valid.tar.gz";
     QProcess tar;
     tar.start(QStringLiteral("tar"),
               {QStringLiteral("-czf"), archive, QStringLiteral("-C"),
-               dir.path() + "/data/zapshell", QStringLiteral("profile")});
+               base + "/data/zapshell", QStringLiteral("profile")});
     QVERIFY(tar.waitForFinished(15000));
     QCOMPARE(tar.exitCode(), 0);
 
-    const QString socket = dir.path() + "/runtime/zapshell.sock";
+    const QString tarReal = QStandardPaths::findExecutable(QStringLiteral("tar"));
+    QVERIFY2(!tarReal.isEmpty(), "tar real não encontrado no PATH");
+
+    QTemporaryDir toolDir;
+    QVERIFY(toolDir.isValid());
+    const QString gateDir = toolDir.path() + QStringLiteral("/gate");
+    QVERIFY(QDir().mkpath(gateDir));
+    const QString startMarker = gateDir + QStringLiteral("/extract-started");
+    const QString releaseMarker = gateDir + QStringLiteral("/extract-release");
+    const QString wrapperPath = toolDir.path() + QStringLiteral("/tar");
+    {
+        QFile wrapper(wrapperPath);
+        QVERIFY2(wrapper.open(QIODevice::WriteOnly | QIODevice::Text), qPrintable(wrapper.errorString()));
+        QTextStream out(&wrapper);
+        out << "#!/bin/sh\n";
+        out << "set -eu\n";
+        out << "REAL_TAR=" << tarReal << "\n";
+        out << "GATE_DIR=" << gateDir << "\n";
+        out << "for a in \"$@\"; do\n";
+        out << "  case \"$a\" in -x|-xzf|-xf|-xz*f|*x*) EXTRACT=1 ;; esac\n";
+        out << "done\n";
+        out << "EXTRACT=0\n";
+        out << "for a in \"$@\"; do case \"$a\" in -x|-xf|-xzf|-xJf|-xjf|-x*) EXTRACT=1 ;; esac; done\n";
+        out << "if [ \"$EXTRACT\" = \"1\" ]; then\n";
+        out << "  : > \"$GATE_DIR/extract-started\"\n";
+        out << "  i=0\n";
+        out << "  while [ ! -f \"$GATE_DIR/extract-release\" ] && [ $i -lt 400 ]; do\n";
+        out << "    sleep 0.05\n";
+        out << "    i=$((i+1))\n";
+        out << "  done\n";
+        out << "fi\n";
+        out << "exec \"$REAL_TAR\" \"$@\"\n";
+        wrapper.close();
+    }
+    QVERIFY(QFile::setPermissions(wrapperPath,
+                                  QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+                                      | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+                                      | QFileDevice::ReadOther | QFileDevice::ExeOther));
+
+    struct BarrierGuard {
+        QString path;
+        ~BarrierGuard() { QFile r(path); if (r.open(QIODevice::WriteOnly)) r.close(); }
+    } barrierGuard{releaseMarker};
+
+    const QString socket = base + "/runtime/zapshell.sock";
     ChildProcess restore;
-    configureChild(restore, dir.path());
+    configureChild(restore, base);
+    QProcessEnvironment env = restore.processEnvironment();
+    env.insert(QStringLiteral("PATH"), toolDir.path() + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
+    restore.setProcessEnvironment(env);
     restore.start(QStringLiteral(ZAPSHELL_BIN), {"--restore", archive});
     QVERIFY(restore.waitForStarted(3000));
 
+    QElapsedTimer startedWait;
+    startedWait.start();
+    while (!QFile::exists(startMarker) && startedWait.elapsed() < 10000) {
+        QVERIFY2(restore.state() != QProcess::NotRunning,
+                 qPrintable(QString::fromLocal8Bit(restore.readAllStandardError())));
+        QTest::qWait(20);
+    }
+    QVERIFY2(QFile::exists(startMarker), "wrapper tar não sinalizou início da extração");
+
+    {
+        zs::InstanceLock probe(socket);
+        QString probeErr;
+        QVERIFY2(!probe.acquireMaintenance(&probeErr, 0),
+                 "restore deve manter lock de manutenção durante extração controlada");
+    }
+
     ChildProcess startup;
-    bool observedRestoreLock = false;
-    bool socketAppearedDuringRestoreLock = false;
-    QElapsedTimer probe;
-    probe.start();
-    while (probe.elapsed() < 4000 && restore.state() != QProcess::NotRunning) {
-        bool restoreHoldingLock = false;
-        {
-            zs::InstanceLock lockProbe(socket);
-            QString probeErr;
-            // Probe bem-sucedido não deve segurar lock; escopo pequeno libera RAII imediatamente.
-            restoreHoldingLock = !lockProbe.acquireMaintenance(&probeErr, 0);
-        }
-        if (restoreHoldingLock) {
-            observedRestoreLock = true;
-            if (startup.program().isEmpty()) {
-                configureChild(startup, dir.path());
-                startup.start(QStringLiteral(ZAPSHELL_BIN), {"--hidden"});
-                QVERIFY(startup.waitForStarted(3000));
-            }
-            // Após observar lock, apenas polling leve por socket; sem re-probe intrusivo.
-            QElapsedTimer contentionWindow;
-            contentionWindow.start();
-            while (contentionWindow.elapsed() < 500 && restore.state() != QProcess::NotRunning) {
-                if (QFile::exists(socket)) {
-                    socketAppearedDuringRestoreLock = true;
-                    break;
-                }
-                QTest::qWait(20);
-            }
+    configureChild(startup, base);
+    startup.start(QStringLiteral(ZAPSHELL_BIN), {"--hidden"});
+    QVERIFY(startup.waitForStarted(3000));
+
+    QElapsedTimer contentionWindow;
+    contentionWindow.start();
+    bool socketAppeared = false;
+    while (contentionWindow.elapsed() < 1200) {
+        QVERIFY2(startup.state() != QProcess::NotRunning,
+                 "startup concorrente encerrou inesperadamente durante contenção");
+        if (QFile::exists(socket)) {
+            socketAppeared = true;
             break;
         }
-        QThread::msleep(10);
+        QTest::qWait(20);
+    }
+    QVERIFY2(!socketAppeared, "startup concorrente não deve criar socket enquanto restore mantém lock");
+
+    {
+        QFile r(releaseMarker);
+        QVERIFY(r.open(QIODevice::WriteOnly));
+        r.close();
     }
 
-    if (!restore.waitForFinished(20000)) {
-        restore.kill();
-        restore.waitForFinished(3000);
-        QSKIP("ZS-14: restore real lento sob carga neste ambiente; observabilidade de contenção limitada");
-    }
-    const QByteArray restoreErr = restore.readAllStandardError();
-    QVERIFY2(restore.exitCode() == 0,
-             qPrintable(QStringLiteral("restore falhou: %1").arg(QString::fromLocal8Bit(restoreErr))));
+    QVERIFY2(restore.waitForFinished(20000),
+             qPrintable(QString::fromLocal8Bit(restore.readAllStandardError())));
+    QCOMPARE(restore.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(restore.exitCode(), 0);
+    QVERIFY2(restore.readAllStandardError().trimmed().isEmpty()
+                 || !QString::fromLocal8Bit(restore.readAllStandardError()).contains("falha"),
+             "restore real deve concluir sem erro");
 
-    if (observedRestoreLock) {
-        QVERIFY2(!socketAppearedDuringRestoreLock,
-                 "startup concorrente não deve criar socket enquanto restore real segura lock");
-    } else {
-        qWarning() << "ZS-14 observabilidade limitada: lock do restore real não observado antes do término;"
-                   << "restore real concluído e validado";
-    }
+    QFile restoredMarker(base + "/data/zapshell/profile/keep.txt");
+    QVERIFY2(restoredMarker.open(QIODevice::ReadOnly), "marker restaurado ausente");
+    QCOMPARE(restoredMarker.readAll(), QByteArray("original"));
 
+    QVERIFY2(waitForSocket(base, 10000), "startup concorrente deve adquirir perfil após restore liberar lock");
+
+    QProcess quit;
+    configureChild(quit, base);
+    quit.start(QStringLiteral(ZAPSHELL_BIN), {"--quit"});
+    quit.waitForFinished(5000);
     if (startup.state() != QProcess::NotRunning) {
-        waitForSocket(dir.path(), 10000);
         startup.kill();
         startup.waitForFinished(3000);
-    }
-
-    if (waitForSocket(dir.path(), 2000)) {
-        QProcess quit;
-        configureChild(quit, dir.path());
-        quit.start(QStringLiteral(ZAPSHELL_BIN), {"--quit"});
-        quit.waitForFinished(3000);
     }
 }
 
