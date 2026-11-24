@@ -127,7 +127,7 @@ int App::run(const cli::Options &options)
     }
 
     QString error;
-    if (!lock.acquire(&error)) {
+    if (!lock.acquire(&error, 15000)) {
         QTextStream(stderr) << "zapshell: " << error << Qt::endl;
         return 1;
     }

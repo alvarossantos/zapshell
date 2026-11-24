@@ -17,54 +17,75 @@ int backupFlow()
 {
     const QString socket = zs::paths::socketPath();
     bool wasRunning = false;
-
-    zs::InstanceLock lock(socket);
-    QString reply;
-    if (lock.send(QStringLiteral("backup"), &reply)) {
-        wasRunning = true;
-        QTextStream(stdout) << reply << Qt::endl;
-        if (!reply.startsWith(QLatin1String("ok")))
-            return 1;
-        if (!zs::InstanceLock::waitUntilReleased(socket, 15000)) {
-            QTextStream(stderr) << "zapshell: instância não encerrou a tempo; backup abortado"
-                                << Qt::endl;
-            return 1; // app ainda vive — não relançar
-        }
-    }
-
+    bool relaunch = false;
     QString archive;
     QString error;
-    if (!zs::createBackup(zs::paths::profileDir(), zs::paths::backupDir(),
-                          QDateTime::currentDateTime(), &archive, &error)) {
-        QTextStream(stderr) << "zapshell: " << error << Qt::endl;
-        if (wasRunning)
-            QProcess::startDetached(QCoreApplication::applicationFilePath(),
-                                    {QStringLiteral("--hidden")});
-        return 1;
+    int result = 1;
+    {
+        zs::InstanceLock lock(socket);
+        QString reply;
+        if (lock.send(QStringLiteral("backup"), &reply)) {
+            QTextStream(stdout) << reply << Qt::endl;
+            if (!reply.startsWith(QLatin1String("ok")))
+                return 1;
+            wasRunning = true;
+            if (!zs::InstanceLock::waitUntilReleased(socket, 15000)) {
+                QTextStream(stderr) << "zapshell: instância não encerrou a tempo (15000 ms); backup abortado" << Qt::endl;
+                return 1;
+            }
+        }
+        if (!lock.acquireMaintenance(&error, 15000)) {
+            QTextStream(stderr) << "zapshell: falha ao adquirir lock de manutenção (15000 ms): " << error << Qt::endl;
+            QString probe;
+            if (lock.send(QStringLiteral("stats"), &probe))
+                relaunch = false; // outra instância ativa venceu a disputa
+            else
+                relaunch = wasRunning; // perfil íntegro, sem instância ativa: preservar
+        } else {
+            // Só é seguro reiniciar após tomar posse exclusiva. Se outro
+            // mantenedor venceu a disputa, não iniciar um perfil concorrente.
+            relaunch = wasRunning;
+            if (zs::createBackup(zs::paths::profileDir(), zs::paths::backupDir(),
+                                    QDateTime::currentDateTime(), &archive, &error)) {
+                QTextStream(stdout) << archive << Qt::endl;
+                result = 0;
+            } else {
+                QTextStream(stderr) << "zapshell: " << error << Qt::endl;
+            }
+        }
     }
-    QTextStream(stdout) << archive << Qt::endl;
-
-    if (wasRunning)
+    if (relaunch)
         QProcess::startDetached(QCoreApplication::applicationFilePath(), {QStringLiteral("--hidden")});
-    return 0;
+    return result;
 }
 
 int restoreFlow(const QString &archive)
 {
-    zs::InstanceLock lock(zs::paths::socketPath());
-    QString reply;
-    if (lock.send(QStringLiteral("stats"), &reply)) {
-        QTextStream(stderr) << "zapshell: Pare o zapshell antes de restaurar" << Qt::endl;
-        return 1;
-    }
-
+    const QString socket = zs::paths::socketPath();
     QString error;
-    if (!zs::restoreBackup(archive, zs::paths::profileDir(), &error)) {
-        QTextStream(stderr) << "zapshell: " << error << Qt::endl;
-        return 1;
+    bool restored = false;
+    {
+        zs::InstanceLock lock(socket);
+        QString reply;
+        if (lock.send(QStringLiteral("stats"), &reply)) {
+            QTextStream(stderr) << "zapshell: Pare o zapshell antes de restaurar" << Qt::endl;
+            return 1;
+        }
+        if (!zs::InstanceLock::waitUntilReleased(socket, 15000)) {
+            QTextStream(stderr) << "zapshell: socket ainda presente após 15000 ms; restore abortado" << Qt::endl;
+            return 1;
+        }
+        if (!lock.acquireMaintenance(&error, 15000)) {
+            QTextStream(stderr) << "zapshell: falha ao adquirir lock de manutenção (15000 ms): " << error << Qt::endl;
+            return 1;
+        }
+        restored = zs::restoreBackup(archive, zs::paths::profileDir(), &error);
+        if (!restored)
+            QTextStream(stderr) << "zapshell: " << error << Qt::endl;
     }
-    QProcess::startDetached(QCoreApplication::applicationFilePath(), {QStringLiteral("--hidden")});
-    return 0;
+    if (restored)
+        QProcess::startDetached(QCoreApplication::applicationFilePath(), {QStringLiteral("--hidden")});
+    return restored ? 0 : 1;
 }
 
 } // namespace
