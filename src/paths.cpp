@@ -1,5 +1,6 @@
 #include "paths.h"
 
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
@@ -50,10 +51,14 @@ QString socketPath()
 
 void ensurePrivateDir(const QString &path)
 {
-    if (!QDir().mkpath(path))
+    if (!QDir().mkpath(path)) {
+        qWarning() << "não foi possível criar diretório privado" << path;
         return;
-    QFile::setPermissions(path,
-                          QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    }
+    if (!QFile::setPermissions(path,
+                               QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner)) {
+        qWarning() << "não foi possível aplicar modo 0700 em" << path;
+    }
 }
 
 } // namespace zs::paths

@@ -1,10 +1,32 @@
 #include <QtTest>
+#include <QtLogging>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 
 #include "paths.h"
+
+namespace {
+
+QStringList capturedWarnings;
+
+void captureWarning(QtMsgType type, const QMessageLogContext &, const QString &message)
+{
+    if (type == QtWarningMsg)
+        capturedWarnings << message;
+}
+
+struct WarningCapture {
+    QtMessageHandler previous;
+    WarningCapture() : previous(qInstallMessageHandler(captureWarning))
+    {
+        capturedWarnings.clear();
+    }
+    ~WarningCapture() { qInstallMessageHandler(previous); }
+};
+
+} // namespace
 
 class TestPaths : public QObject
 {
@@ -15,6 +37,7 @@ private slots:
     void honoursXdgDataHome();
     void cacheIsSeparateFromProfile();
     void existingDirectoryBecomesPrivate();
+    void creationFailureIsWarned();
 };
 
 void TestPaths::profileIsNotInCache()
@@ -69,6 +92,23 @@ void TestPaths::existingDirectoryBecomesPrivate()
     QVERIFY(probe.open(QIODevice::WriteOnly)); // conteúdo continua gravável
     probe.write("ok");
     probe.close();
+}
+
+void TestPaths::creationFailureIsWarned()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString blocked = dir.path() + "/not-a-dir";
+    QFile file(blocked);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    {
+        WarningCapture capture;
+        zs::paths::ensurePrivateDir(blocked);
+        QVERIFY2(!capturedWarnings.isEmpty(), "falha de mkpath deve gerar aviso");
+        QVERIFY2(capturedWarnings.last().contains(blocked), "aviso deve nomear o caminho");
+    }
 }
 
 QTEST_GUILESS_MAIN(TestPaths)
