@@ -4,6 +4,7 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -11,6 +12,9 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <algorithm>
+#include <array>
+#include <atomic>
 
 #include "instance.h"
 
@@ -26,6 +30,7 @@ private slots:
     void oversizedLineIsDropped();
     void doesNotDeleteRegularFileAtSocketPath();
     void idleConnectionIsClosed();
+    void concurrentAcquireHasSingleOwner();
 };
 
 void TestInstance::secondInstanceSendsVerbToFirst()
@@ -172,6 +177,44 @@ void TestInstance::idleConnectionIsClosed()
     QVERIFY(client.waitForConnected(1000));
     QTRY_COMPARE_WITH_TIMEOUT(client.state(), QLocalSocket::UnconnectedState, 3500);
     QCOMPARE(calls, 0);
+}
+
+void TestInstance::concurrentAcquireHasSingleOwner()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+    constexpr int kRacers = 4;
+
+    std::atomic<int> atGate{0};
+    std::atomic<bool> go{false};
+    std::array<bool, kRacers> won{};
+    QList<QThread *> threads;
+
+    for (int i = 0; i < kRacers; ++i) {
+        auto *t = QThread::create([&, i] {
+            zs::InstanceLock lock(socketPath);
+            atGate.fetch_add(1);
+            while (!go.load())
+                QThread::yieldCurrentThread();
+            QString error;
+            won[i] = lock.acquire(&error);
+            if (won[i])
+                QThread::msleep(60); // mantém a posse enquanto os outros tentam
+        });
+        threads << t;
+        t->start();
+    }
+
+    while (atGate.load() < kRacers)
+        QThread::yieldCurrentThread();
+    go.store(true);
+    for (QThread *t : threads) {
+        QVERIFY(t->wait(5000));
+        delete t;
+    }
+
+    const int owners = std::count(won.begin(), won.end(), true);
+    QCOMPARE(owners, 1);
 }
 
 QTEST_GUILESS_MAIN(TestInstance)

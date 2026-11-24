@@ -9,7 +9,10 @@
 #include <QThread>
 #include <QTimer>
 
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace zs {
 
@@ -24,11 +27,41 @@ InstanceLock::~InstanceLock()
         m_server->close();
         QLocalServer::removeServer(m_socketPath);
     }
+    lockRelease();
+}
+
+bool InstanceLock::lockAcquire(QString *error)
+{
+    const QString lockPath = m_socketPath + QStringLiteral(".lock");
+    m_lockFd = ::open(QFile::encodeName(lockPath).constData(),
+                      O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    if (m_lockFd < 0) {
+        if (error) *error = QStringLiteral("não foi possível abrir o lock: ") + lockPath;
+        return false;
+    }
+    if (::flock(m_lockFd, LOCK_EX | LOCK_NB) != 0) {
+        lockRelease();
+        if (error) *error = QStringLiteral("inicialização concorrente: ") + lockPath;
+        return false;
+    }
+    return true;
+}
+
+void InstanceLock::lockRelease()
+{
+    if (m_lockFd >= 0) {
+        ::flock(m_lockFd, LOCK_UN);
+        ::close(m_lockFd);
+        m_lockFd = -1;
+    }
 }
 
 bool InstanceLock::acquire(QString *error)
 {
     if (!m_server) {
+        if (!lockAcquire(error))
+            return false;
+
         QLocalSocket probe;
         probe.connectToServer(m_socketPath);
         if (probe.waitForConnected(300)) {

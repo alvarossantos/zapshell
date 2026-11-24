@@ -41,10 +41,13 @@ public:
     void setHandler(std::function<QString(const QString &verb)> handler);
 
 private:
+    bool lockAcquire(QString *error);
+    void lockRelease();
     void handleConnection();
 
     QString m_socketPath;
     QLocalServer *m_server = nullptr;
+    int m_lockFd = -1;
     std::function<QString(const QString &)> m_handler;
 };
 } // namespace zs
