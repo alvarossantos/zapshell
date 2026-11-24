@@ -6,6 +6,12 @@
 #include <QLocalSocket>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QDir>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QFileInfo>
+#include <QElapsedTimer>
+#include <QTest>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -37,6 +43,53 @@ private slots:
     void failedAcquireReleasesLock();
     void waitBudgetIsNotReset();
     void maintenanceAcquireIsExclusive();
+    void maintenanceLockBlocksProfileStartup();
+    void restoreBlocksProfileStartup();
+    void startupWaitReleasesAfterMaintenance();
+    void lockLostBeforeMaintenanceDoesNotRelaunch();
+    void ipcCommandsUnchanged();
+    void shutdownToMaintenanceContention();
+    void restoreFailureDoesNotRelaunch();
+};
+
+static void configureChild(QProcess &process, const QString &base)
+{
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("XDG_DATA_HOME", base + "/data");
+    env.insert("XDG_CACHE_HOME", base + "/cache");
+    env.insert("XDG_RUNTIME_DIR", base + "/runtime");
+    env.insert("QT_QPA_PLATFORM", "offscreen");
+    process.setProcessEnvironment(env);
+}
+
+static bool hasProfileFiles(const QString &base)
+{
+    return QDir(base + "/data/zapshell/profile").exists();
+}
+
+static bool waitForSocket(const QString &base, int timeout = 5000)
+{
+    QElapsedTimer timer; timer.start();
+    while (timer.elapsed() < timeout) {
+        if (QFile::exists(base + "/runtime/zapshell.sock")) return true;
+        QTest::qWait(50);
+    }
+    return QFile::exists(base + "/runtime/zapshell.sock");
+}
+
+static bool runCli(const QString &base, const QStringList &args, QByteArray *out = nullptr,
+                   QByteArray *err = nullptr, int timeout = 5000)
+{
+    QProcess p; configureChild(p, base); p.start(QStringLiteral(ZAPSHELL_BIN), args);
+    if (!p.waitForStarted(3000) || !p.waitForFinished(timeout)) { p.kill(); p.waitForFinished(); return false; }
+    if (out) *out = p.readAllStandardOutput();
+    if (err) *err = p.readAllStandardError();
+    return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
+}
+
+struct ChildProcess : QProcess
+{
+    ~ChildProcess() override { if (state()!=NotRunning) { kill(); waitForFinished(3000); } }
 };
 
 void TestInstance::secondInstanceSendsVerbToFirst()
@@ -290,6 +343,133 @@ void TestInstance::maintenanceAcquireIsExclusive()
     }
     zs::InstanceLock third(socketPath);
     QVERIFY(third.acquireMaintenance());
+}
+
+void TestInstance::maintenanceLockBlocksProfileStartup()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    QDir().mkpath(dir.path() + "/runtime");
+    auto holder = std::make_unique<zs::InstanceLock>(dir.path() + "/runtime/zapshell.sock");
+    QVERIFY(holder->acquireMaintenance());
+    ChildProcess child; configureChild(child, dir.path());
+    child.start(QStringLiteral(ZAPSHELL_BIN), {"--hidden"});
+    QVERIFY(child.waitForStarted(3000));
+    QTest::qWait(2000);
+    QVERIFY(!QFile::exists(dir.path() + "/runtime/zapshell.sock"));
+    QVERIFY(!hasProfileFiles(dir.path()));
+    holder.reset();
+    QElapsedTimer wait; wait.start();
+    while (!QFile::exists(dir.path() + "/runtime/zapshell.sock") && wait.elapsed() < 18000) {
+        QTest::qWait(100);
+        if (child.state() == QProcess::NotRunning)
+            break;
+    }
+    const QByteArray out = child.readAllStandardOutput();
+    const QByteArray err = child.readAllStandardError();
+    qInfo() << "startup diagnostic socket=" << QFile::exists(dir.path() + "/runtime/zapshell.sock")
+            << "elapsed=" << wait.elapsed() << "state=" << child.state()
+            << "exitCode=" << child.exitCode() << "exitStatus=" << child.exitStatus()
+            << "stdout=" << out << "stderr=" << err;
+    QVERIFY2(QFile::exists(dir.path() + "/runtime/zapshell.sock"),
+             "startup diagnostic above records the blocked child state");
+    child.kill(); child.waitForFinished(3000);
+}
+
+void TestInstance::restoreBlocksProfileStartup()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
+    QDir().mkpath(dir.path()+"/data/zapshell/profile"); QFile marker(dir.path()+"/data/zapshell/profile/keep");
+    QVERIFY(marker.open(QIODevice::WriteOnly)); marker.write("untouched"); marker.close();
+    const QString archive=dir.path()+"/valid.tar.gz";
+    QProcess tar; tar.start("tar", {"-czf",archive,"-C",dir.path()+"/data/zapshell","profile"});
+    QVERIFY(tar.waitForFinished(5000)); QCOMPARE(tar.exitCode(),0);
+    auto holder=std::make_unique<zs::InstanceLock>(dir.path()+"/runtime/zapshell.sock"); QVERIFY(holder->acquireMaintenance());
+    ChildProcess restore; configureChild(restore,dir.path()); restore.start(QStringLiteral(ZAPSHELL_BIN),{"--restore",archive}); QVERIFY(restore.waitForStarted(3000));
+    QTest::qWait(1000); QVERIFY(QFile::exists(marker.fileName())); QCOMPARE(QFileInfo(marker.fileName()).size(),qint64(9));
+    holder.reset(); QVERIFY(restore.waitForFinished(18000));
+    QVERIFY(QFile::exists(marker.fileName()));
+}
+
+void TestInstance::startupWaitReleasesAfterMaintenance()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
+    auto holder=std::make_unique<zs::InstanceLock>(dir.path()+"/runtime/zapshell.sock"); QVERIFY(holder->acquireMaintenance());
+    ChildProcess child; configureChild(child,dir.path()); child.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(child.waitForStarted(3000));
+    std::thread release([&holder]{ QThread::msleep(1000); holder.reset(); });
+    const bool socket=waitForSocket(dir.path(),5000); release.join();
+    QVERIFY2(socket,qPrintable(QString::fromUtf8(child.readAllStandardError()))); child.kill(); child.waitForFinished(3000);
+
+    QTemporaryDir blocked; QVERIFY(blocked.isValid()); QDir().mkpath(blocked.path()+"/runtime");
+    auto held=std::make_unique<zs::InstanceLock>(blocked.path()+"/runtime/zapshell.sock"); QVERIFY(held->acquireMaintenance());
+    ChildProcess timeout; configureChild(timeout,blocked.path()); QElapsedTimer timer; timer.start();
+    timeout.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(timeout.waitForStarted(3000)); QVERIFY(timeout.waitForFinished(18000));
+    const qint64 elapsed=timer.elapsed(); const QByteArray err=timeout.readAllStandardError();
+    QVERIFY2(elapsed>=14000 && elapsed<=17500,qPrintable(QString::number(elapsed)));
+    QVERIFY2(err.contains("15000 ms"),qPrintable(QString::fromUtf8(err)));
+}
+
+void TestInstance::lockLostBeforeMaintenanceDoesNotRelaunch()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
+    ChildProcess app; configureChild(app,dir.path()); app.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(app.waitForStarted(3000));
+    if (!waitForSocket(dir.path(),5000)) { app.kill(); app.waitForFinished(); QFAIL("app did not acquire its socket"); }
+
+    // Outra instância viva assume o lock após a dona encerrar; a manutenção não
+    // deve relançar uma terceira instância desnecessária.
+    zs::InstanceLock lock(dir.path()+"/runtime/zapshell.sock");
+    QProcess quit; configureChild(quit,dir.path()); quit.start(QStringLiteral(ZAPSHELL_BIN),{"--quit"});
+    QVERIFY(quit.waitForFinished(5000));
+    QVERIFY(zs::InstanceLock::waitUntilReleased(dir.path()+"/runtime/zapshell.sock", 5000));
+
+    std::atomic<bool> acquired{false}, release{false};
+    std::thread contender([&] {
+        zs::InstanceLock other(dir.path()+"/runtime/zapshell.sock"); QString error;
+        acquired.store(other.acquireMaintenance(&error,17000));
+        while(acquired.load() && !release.load()) QThread::msleep(10);
+    });
+    QElapsedTimer probe; probe.start();
+    while (!acquired.load() && probe.elapsed() < 2000) QThread::msleep(10);
+    QVERIFY(acquired.load());
+
+    QProcess backup; configureChild(backup,dir.path()); backup.start(QStringLiteral(ZAPSHELL_BIN),{"--backup"});
+    const bool finished = backup.waitForFinished(20000);
+    release.store(true); contender.join();
+    QVERIFY(finished);
+    QCOMPARE(backup.exitCode(), 1);
+    QTest::qWait(2000);
+    QVERIFY2(!QFile::exists(dir.path()+"/runtime/zapshell.sock"),
+             "manutenção não deve relançar instância quando outra está ativa");
+    if (app.state()!=QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+}
+
+void TestInstance::ipcCommandsUnchanged()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
+    ChildProcess app; configureChild(app,dir.path()); app.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(app.waitForStarted(3000));
+    if (!waitForSocket(dir.path(),5000)) { app.kill(); app.waitForFinished(); QFAIL("app did not start"); }
+    QElapsedTimer timer; timer.start(); QByteArray out; QVERIFY(runCli(dir.path(),{"--stats"},&out)); QVERIFY(timer.elapsed()<1000); QVERIFY(!out.isEmpty());
+    app.kill(); app.waitForFinished(3000); QLocalServer::removeServer(dir.path()+"/runtime/zapshell.sock");
+    for (const QString &arg : {"--quit","--toggle","--stats"}) { timer.restart(); QVERIFY(runCli(dir.path(),{arg},&out)); QVERIFY(timer.elapsed()<1000); }
+}
+
+void TestInstance::shutdownToMaintenanceContention()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime"); QDir().mkpath(dir.path()+"/data/zapshell/profile");
+    QFile marker(dir.path()+"/data/zapshell/profile/keep"); QVERIFY(marker.open(QIODevice::WriteOnly)); marker.write("x"); marker.close();
+    auto holder=std::make_unique<zs::InstanceLock>(dir.path()+"/runtime/zapshell.sock"); QVERIFY(holder->acquireMaintenance());
+    ChildProcess backup; configureChild(backup,dir.path()); backup.start(QStringLiteral(ZAPSHELL_BIN),{"--backup"}); QVERIFY(backup.waitForStarted(3000));
+    QTest::qWait(1000); QVERIFY(QDir(dir.path()+"/data/zapshell/backups").entryList({"*.tar.gz"},QDir::Files).isEmpty());
+    holder.reset(); QVERIFY(backup.waitForFinished(18000)); QCOMPARE(backup.exitCode(),0);
+    QVERIFY(!QDir(dir.path()+"/data/zapshell/backups").entryList({"*.tar.gz"},QDir::Files).isEmpty());
+}
+
+void TestInstance::restoreFailureDoesNotRelaunch()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
+    QFile bad(dir.path()+"/bad.tar.gz"); QVERIFY(bad.open(QIODevice::WriteOnly)); bad.write("invalid"); bad.close();
+    QByteArray err; ChildProcess restore; configureChild(restore,dir.path()); restore.start(QStringLiteral(ZAPSHELL_BIN),{"--restore",bad.fileName()});
+    QVERIFY(restore.waitForFinished(10000)); QVERIFY(restore.exitCode()!=0); QVERIFY(!restore.readAllStandardError().isEmpty());
+    QTest::qWait(2000); QVERIFY(!QFile::exists(dir.path()+"/runtime/zapshell.sock"));
 }
 
 QTEST_GUILESS_MAIN(TestInstance)
