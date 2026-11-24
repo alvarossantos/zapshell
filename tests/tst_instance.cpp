@@ -563,6 +563,11 @@ void TestInstance::invalidTransitionMaintenanceToAcquirePreservesExclusivity()
     QVERIFY(!lock.acquire(&transitionError, 0));
     QVERIFY2(!transitionError.isEmpty(), "transição inválida deve reportar erro claro");
 
+    QString recheckError;
+    QVERIFY2(lock.acquireMaintenance(&recheckError, 0),
+             qPrintable(QStringLiteral("estado original de manutenção não deve ser corrompido: %1")
+                            .arg(recheckError)));
+
     zs::InstanceLock other(socketPath);
     QString otherError;
     QVERIFY2(!other.acquireMaintenance(&otherError, 0),
@@ -581,6 +586,11 @@ void TestInstance::invalidTransitionAcquireToMaintenancePreservesExclusivity()
     QString transitionError;
     QVERIFY(!lock.acquireMaintenance(&transitionError, 0));
     QVERIFY2(!transitionError.isEmpty(), "transição inválida deve reportar erro claro");
+
+    QString recheckError;
+    QVERIFY2(lock.acquire(&recheckError, 0),
+             qPrintable(QStringLiteral("estado original de aplicação não deve ser corrompido: %1")
+                            .arg(recheckError)));
 
     zs::InstanceLock other(socketPath);
     QString otherError;
