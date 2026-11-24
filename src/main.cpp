@@ -85,8 +85,11 @@ int backupFlow()
             }
         }
     }
-    if (relaunch)
-        QProcess::startDetached(QCoreApplication::applicationFilePath(), {QStringLiteral("--hidden")});
+    if (relaunch) {
+        if (!QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                     {QStringLiteral("--hidden")}))
+            QTextStream(stderr) << "zapshell: falha ao relançar após backup" << Qt::endl;
+    }
     return result;
 }
 
@@ -137,8 +140,11 @@ int restoreFlow(const QString &archive)
         if (!restored)
             QTextStream(stderr) << "zapshell: " << error << Qt::endl;
     }
-    if (restored)
-        QProcess::startDetached(QCoreApplication::applicationFilePath(), {QStringLiteral("--hidden")});
+    if (restored) {
+        if (!QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                     {QStringLiteral("--hidden")}))
+            QTextStream(stderr) << "zapshell: falha ao relançar após restauração" << Qt::endl;
+    }
     return restored ? 0 : 1;
 }
 
