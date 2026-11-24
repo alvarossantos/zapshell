@@ -26,6 +26,7 @@ public:
 
 signals:
     void downloadFinished(const QString &fileName);
+    void downloadInterrupted(const QString &fileName);
 
 private:
     void onPermissionRequested(QWebEnginePermission permission);

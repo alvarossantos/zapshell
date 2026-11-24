@@ -177,6 +177,9 @@ int App::run(const cli::Options &options)
     connect(&profile, &Profile::downloadFinished, &notifier, [&notifier](const QString &fileName) {
         notifier.show(QStringLiteral("Download concluído"), fileName);
     });
+    connect(&profile, &Profile::downloadInterrupted, &notifier, [&notifier](const QString &fileName) {
+        notifier.show(QStringLiteral("Download interrompido"), fileName);
+    });
 
     connect(&tray, &Tray::silentToggled, &notifier, &Notifier::setSilent);
     connect(&notifier, &Notifier::clicked, &window, &Window::showAndRaise);

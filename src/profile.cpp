@@ -105,6 +105,9 @@ void Profile::onDownloadRequested(QWebEngineDownloadRequest *download)
                                        == QWebEngineDownloadRequest::DownloadCompleted;
                 if (web::shouldNotifyDownload(download->isFinished(), completed))
                     emit downloadFinished(download->downloadFileName());
+                else if (web::shouldNotifyInterrupted(download->isFinished(),
+                                                      int(download->state())))
+                    emit downloadInterrupted(download->downloadFileName());
             });
     download->accept();
 }

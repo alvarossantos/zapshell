@@ -21,6 +21,7 @@ private slots:
     void downloadNameCannotEscapeDirectory();
     void downloadNameAvoidsCollision();
     void onlyCompletedDownloadsAreReported();
+    void interruptedDownloadsAreDistinguished();
 };
 
 void TestWeb::flagsHaveBudgetDefaults()
@@ -104,6 +105,15 @@ void TestWeb::onlyCompletedDownloadsAreReported()
     QVERIFY(!zs::web::shouldNotifyDownload(false, true)); // ainda em andamento
     QVERIFY(!zs::web::shouldNotifyDownload(true, false)); // cancelado/interrompido
     QVERIFY(zs::web::shouldNotifyDownload(true, true));   // concluído
+}
+
+void TestWeb::interruptedDownloadsAreDistinguished()
+{
+    QVERIFY(!zs::web::shouldNotifyInterrupted(false, zs::DownloadCancelled));
+    QVERIFY(zs::web::shouldNotifyInterrupted(true, zs::DownloadCancelled));
+    QVERIFY(zs::web::shouldNotifyInterrupted(true, zs::DownloadInterrupted));
+    QVERIFY(!zs::web::shouldNotifyInterrupted(true, 0)); // DownloadRequested
+    QVERIFY(!zs::web::shouldNotifyInterrupted(true, 2)); // DownloadCompleted
 }
 
 QTEST_GUILESS_MAIN(TestWeb)

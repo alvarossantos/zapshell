@@ -27,4 +27,8 @@ bool permissionGranted(const QString &origin, int feature);
 // exige o estado DownloadCompleted.
 bool shouldNotifyDownload(bool finished, bool completed);
 
+// isFinished() também vale para cancelado/interrompido: anunciar interrupção
+// exige um desses estados, e não DownloadCompleted.
+bool shouldNotifyInterrupted(bool finished, int state);
+
 } // namespace zs::web

@@ -14,4 +14,9 @@ constexpr int FeatureDesktopVideoCapture = 4;
 constexpr int FeatureDesktopAudioVideoCapture = 5;
 constexpr int FeatureNotifications = 7;
 
+// Espelho de QWebEngineDownloadRequest::DownloadState para estados finais de
+// download; web.cpp valida os valores com static_assert.
+constexpr int DownloadCancelled = 3;
+constexpr int DownloadInterrupted = 4;
+
 } // namespace zs

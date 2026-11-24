@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 
+#include <QWebEngineDownloadRequest>
 #include <QWebEnginePage>
 #include <QWebEnginePermission>
 
@@ -22,6 +23,10 @@ static_assert(int(QWebEnginePermission::PermissionType::DesktopAudioVideoCapture
               "FeatureDesktopAudioVideoCapture divergiu de QWebEnginePermission::PermissionType");
 static_assert(int(QWebEnginePermission::PermissionType::Notifications) == zs::FeatureNotifications,
               "FeatureNotifications divergiu de QWebEnginePermission::PermissionType");
+static_assert(int(QWebEngineDownloadRequest::DownloadCancelled) == zs::DownloadCancelled,
+              "DownloadCancelled divergiu de QWebEngineDownloadRequest::DownloadState");
+static_assert(int(QWebEngineDownloadRequest::DownloadInterrupted) == zs::DownloadInterrupted,
+              "DownloadInterrupted divergiu de QWebEngineDownloadRequest::DownloadState");
 
 namespace zs::web {
 namespace {
@@ -93,6 +98,11 @@ bool permissionGranted(const QString &origin, int feature)
 bool shouldNotifyDownload(bool finished, bool completed)
 {
     return finished && completed;
+}
+
+bool shouldNotifyInterrupted(bool finished, int state)
+{
+    return finished && (state == DownloadCancelled || state == DownloadInterrupted);
 }
 
 } // namespace zs::web
