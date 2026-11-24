@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
 
 namespace zs {
 namespace {
@@ -91,7 +92,19 @@ bool createBackup(const QString &profileDir, const QString &backupDir, const QDa
     }
 
     const QString archive = backupDir + "/" + backupName(now);
-    const QString partial = archive + QStringLiteral(".partial");
+    // Remove apenas o caminho legado determinístico; temporários ativos de
+    // operações concorrentes nunca são varridos nem removidos aqui.
+    QFile::remove(archive + QStringLiteral(".partial"));
+    QTemporaryFile partialFile(backupDir + QStringLiteral("/zapshell-XXXXXX.partial"));
+    if (!partialFile.open()) {
+        QFile::remove(partialFile.fileName());
+        if (error)
+            *error = QStringLiteral("não foi possível criar arquivo temporário: ")
+                     + partialFile.errorString();
+        return false;
+    }
+    const QString partial = partialFile.fileName();
+    partialFile.close();
     if (!runTar({QStringLiteral("-czf"), partial, QStringLiteral("-C"), info.absolutePath(),
                  info.fileName()},
                 error)
@@ -110,6 +123,9 @@ bool createBackup(const QString &profileDir, const QString &backupDir, const QDa
         QFile::remove(partial);
         return false;
     }
+    // Same-second backups keep the existing sequential replacement policy:
+    // the later complete archive atomically replaces the earlier one.
+    partialFile.setAutoRemove(false);
 
     QStringList backups;
     for (const QString &name : QDir(backupDir).entryList({QStringLiteral("zapshell-*.tar.gz")},
