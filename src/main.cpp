@@ -36,6 +36,11 @@ int backupFlow()
         }
         if (!lock.acquireMaintenance(&error, 15000)) {
             QTextStream(stderr) << "zapshell: falha ao adquirir lock de manutenção (15000 ms): " << error << Qt::endl;
+            QString probe;
+            if (lock.send(QStringLiteral("stats"), &probe))
+                relaunch = false; // outra instância ativa venceu a disputa
+            else
+                relaunch = wasRunning; // perfil íntegro, sem instância ativa: preservar
         } else {
             // Só é seguro reiniciar após tomar posse exclusiva. Se outro
             // mantenedor venceu a disputa, não iniciar um perfil concorrente.

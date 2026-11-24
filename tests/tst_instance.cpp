@@ -47,6 +47,7 @@ private slots:
     void restoreBlocksProfileStartup();
     void startupWaitReleasesAfterMaintenance();
     void lockLostBeforeMaintenanceDoesNotRelaunch();
+    void backupMaintenanceFailureWithoutResponderRelaunches();
     void ipcCommandsUnchanged();
     void shutdownToMaintenanceContention();
     void restoreFailureDoesNotRelaunch();
@@ -388,6 +389,11 @@ void TestInstance::restoreBlocksProfileStartup()
     QTest::qWait(1000); QVERIFY(QFile::exists(marker.fileName())); QCOMPARE(QFileInfo(marker.fileName()).size(),qint64(9));
     holder.reset(); QVERIFY(restore.waitForFinished(18000));
     QVERIFY(QFile::exists(marker.fileName()));
+    if (waitForSocket(dir.path(), 5000)) {
+        QProcess quit; configureChild(quit, dir.path());
+        quit.start(QStringLiteral(ZAPSHELL_BIN), {"--quit"});
+        quit.waitForFinished(3000);
+    }
 }
 
 void TestInstance::startupWaitReleasesAfterMaintenance()
@@ -440,6 +446,45 @@ void TestInstance::lockLostBeforeMaintenanceDoesNotRelaunch()
     QVERIFY2(!QFile::exists(dir.path()+"/runtime/zapshell.sock"),
              "manutenção não deve relançar instância quando outra está ativa");
     if (app.state()!=QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+}
+
+void TestInstance::backupMaintenanceFailureWithoutResponderRelaunches()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
+    ChildProcess app; configureChild(app,dir.path()); app.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(app.waitForStarted(3000));
+    if (!waitForSocket(dir.path(),5000)) { app.kill(); app.waitForFinished(); QFAIL("app did not start"); }
+
+    // App estava ativa; após sair, um maintainer sem servidor IPC segura o lock.
+    // backupFlow deve falhar a manutenção mas preservar relaunch (perfil íntegro).
+    std::atomic<bool> acquired{false}, release{false}, stop{false};
+    std::thread contender([&] {
+        const QString socket = dir.path()+"/runtime/zapshell.sock";
+        while (!stop.load()) {
+            if (!QFile::exists(socket)) {
+                zs::InstanceLock other(socket); QString err;
+                if (other.acquireMaintenance(&err, 0)) {
+                    acquired.store(true);
+                    while (!release.load()) QThread::msleep(10);
+                    return;
+                }
+            }
+            QThread::msleep(5);
+        }
+    });
+
+    QProcess backup; configureChild(backup,dir.path()); backup.start(QStringLiteral(ZAPSHELL_BIN),{"--backup"});
+    const bool finished = backup.waitForFinished(35000);
+    stop.store(true);
+    release.store(true);
+    contender.join();
+    QVERIFY(finished);
+    QCOMPARE(backup.exitCode(), 1);
+    QVERIFY2(acquired.load(), "contender devia ter adquirido o lock de manutenção");
+    QVERIFY2(waitForSocket(dir.path(), 8000),
+             "falha de manutenção sem instância ativa deve preservar relaunch");
+
+    QProcess quit2; configureChild(quit2,dir.path()); quit2.start(QStringLiteral(ZAPSHELL_BIN),{"--quit"});
+    quit2.waitForFinished(5000);
 }
 
 void TestInstance::ipcCommandsUnchanged()
