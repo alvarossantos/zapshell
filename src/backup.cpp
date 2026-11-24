@@ -1,5 +1,9 @@
 #include "backup.h"
 
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -81,16 +85,14 @@ bool createBackup(const QString &profileDir, const QString &backupDir, const QDa
         QFile::remove(partial);
         return false;
     }
-    // Só trocar o definitivo depois que o temporário passou na validação.
-    if (QFile::exists(archive) && !QFile::remove(archive)) {
+    // rename(2) é atômico em POSIX no mesmo filesystem: substitui o archive
+    // anterior sem deixar o caminho vazio. QFile::rename() recusa destino existente.
+    const QByteArray from = QFile::encodeName(partial);
+    const QByteArray to = QFile::encodeName(archive);
+    if (::rename(from.constData(), to.constData()) != 0) {
         if (error)
-            *error = QStringLiteral("não foi possível substituir ") + archive;
-        QFile::remove(partial);
-        return false;
-    }
-    if (!QFile::rename(partial, archive)) {
-        if (error)
-            *error = QStringLiteral("não foi possível finalizar ") + archive;
+            *error = QStringLiteral("não foi possível finalizar %1: %2")
+                         .arg(archive, QString::fromLocal8Bit(std::strerror(errno)));
         QFile::remove(partial);
         return false;
     }

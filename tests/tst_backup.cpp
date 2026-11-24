@@ -27,6 +27,8 @@ private slots:
     void twoRestoresInSameSecondKeepBothPreviousProfiles();
     void hiddenSymlinkIsRejected();
     void stalePartialIsNotLeftBehind();
+    void existingArchiveIsReplacedWithoutGap();
+    void failedPublishKeepsPreviousArchive();
 };
 
 void TestBackup::keepsNewestFour()
@@ -288,6 +290,85 @@ void TestBackup::stalePartialIsNotLeftBehind()
     QVERIFY2(zs::createBackup(profile, backups, now, &out, &error), qPrintable(error));
     QVERIFY(QFile::exists(archive));
     QVERIFY(!QFile::exists(archive + QStringLiteral(".partial")));
+}
+
+void TestBackup::existingArchiveIsReplacedWithoutGap()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString profile = dir.path() + "/profile";
+    const QString backups = dir.path() + "/backups";
+    QVERIFY(QDir().mkpath(profile));
+
+    const QDateTime now(QDate(2026, 11, 23), QTime(21, 0, 0));
+    const QString archive = backups + "/" + zs::backupName(now);
+
+    QFile oldMarker(profile + "/marker.txt");
+    QVERIFY(oldMarker.open(QIODevice::WriteOnly));
+    oldMarker.write("antigo");
+    oldMarker.close();
+    QString first;
+    QString error;
+    QVERIFY2(zs::createBackup(profile, backups, now, &first, &error), qPrintable(error));
+    QCOMPARE(first, archive);
+
+    QFile newMarker(profile + "/marker.txt");
+    QVERIFY(newMarker.open(QIODevice::WriteOnly));
+    newMarker.write("novo");
+    newMarker.close();
+    QString second;
+    QVERIFY2(zs::createBackup(profile, backups, now, &second, &error), qPrintable(error));
+    QCOMPARE(second, archive);
+    QVERIFY(QFile::exists(archive));
+    QVERIFY(!QFile::exists(archive + QStringLiteral(".partial")));
+
+    QProcess tar;
+    tar.start(QStringLiteral("tar"), {QStringLiteral("-xzOf"), archive,
+                                      QStringLiteral("profile/marker.txt")});
+    QVERIFY(tar.waitForFinished(10000));
+    QCOMPARE(tar.readAllStandardOutput(), QByteArray("novo"));
+}
+
+void TestBackup::failedPublishKeepsPreviousArchive()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString profile = dir.path() + "/profile";
+    const QString backups = dir.path() + "/backups";
+    QVERIFY(QDir().mkpath(profile));
+    QVERIFY(QDir().mkpath(backups));
+
+    QFile marker(profile + "/marker.txt");
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("sobrevivente");
+    marker.close();
+
+    const QDateTime timestampA(QDate(2026, 11, 23), QTime(21, 0, 0));
+    const QString archiveA = backups + "/" + zs::backupName(timestampA);
+    QString error;
+    QString out;
+    QVERIFY2(zs::createBackup(profile, backups, timestampA, &out, &error), qPrintable(error));
+    QCOMPARE(out, archiveA);
+    QVERIFY(QFile::exists(archiveA));
+
+    QProcess tar;
+    tar.start(QStringLiteral("tar"), {QStringLiteral("-tzf"), archiveA});
+    QVERIFY(tar.waitForFinished(10000));
+    QCOMPARE(tar.exitCode(), 0);
+
+    const QDateTime timestampB(QDate(2026, 11, 23), QTime(21, 5, 0));
+    const QString archiveB = backups + "/" + zs::backupName(timestampB);
+    QVERIFY(QDir().mkpath(archiveB));
+    QString retryError;
+    QVERIFY(!zs::createBackup(profile, backups, timestampB, nullptr, &retryError));
+    QVERIFY(QFile::exists(archiveA));
+    QProcess verifyA;
+    verifyA.start(QStringLiteral("tar"), {QStringLiteral("-tzf"), archiveA});
+    QVERIFY(verifyA.waitForFinished(10000));
+    QCOMPARE(verifyA.exitCode(), 0);
+    QVERIFY(QDir(archiveB).exists());
+    QVERIFY(!retryError.isEmpty());
+    QVERIFY(!QFile::exists(archiveB + QStringLiteral(".partial")));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)
