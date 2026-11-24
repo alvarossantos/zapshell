@@ -36,9 +36,8 @@ zapshell --restore ARQ  # exige app parado; valida o archive antes de extrair
 zapshell --quit         # encerra
 ```
 
-`--stats` lê a última amostra de um coletor assíncrono, atualizado a cada 1 s
-por `QTimer`; o handler IPC apenas consulta esse valor, sem bloquear a thread da
-interface enquanto mede RSS/CPU da árvore de processos.
+`--stats` lê a última amostra de um coletor com `QTimer` de 1 s; o handler IPC
+lê essa amostra, sem medir a árvore de processos no caminho da requisição.
 
 No tray: mostrar/ocultar, recarregar, backup agora, silenciar e sair. Fechar a
 janela apenas a esconde; `Ctrl+Q` pede confirmação antes de encerrar. `Ctrl+F`
@@ -98,9 +97,9 @@ guardado como `profile.before-restore-<timestamp>`. Nunca tarre o perfil com o
 app rodando: use `--backup`.
 
 O socket IPC fica em `$XDG_RUNTIME_DIR/zapshell.sock`; a aquisição usa `flock`
-em `.lock` (modo `0600`) para garantir uma única instância. Conexões que não
-enviam o verbo em 2 s são desligadas, buffers acima de 1 KiB sem nova linha são
-descartados e cada `send()` expira após 1500 ms por padrão.
+em `.lock` (modo `0600`) para garantir uma única instância. Conexões ociosas por
+2 s são desligadas, buffers acima de 1 KiB sem nova linha são descartados e cada
+`send()` expira após 1500 ms por padrão.
 
 ## Notificações e permissões
 
