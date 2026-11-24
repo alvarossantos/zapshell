@@ -51,6 +51,10 @@ private slots:
     void ipcCommandsUnchanged();
     void shutdownToMaintenanceContention();
     void restoreFailureDoesNotRelaunch();
+    void acquireIsIdempotentForAppLock();
+    void acquireMaintenanceIsIdempotentForMaintenanceLock();
+    void invalidTransitionMaintenanceToAcquirePreservesExclusivity();
+    void invalidTransitionAcquireToMaintenancePreservesExclusivity();
 };
 
 static void configureChild(QProcess &process, const QString &base)
@@ -515,6 +519,74 @@ void TestInstance::restoreFailureDoesNotRelaunch()
     QByteArray err; ChildProcess restore; configureChild(restore,dir.path()); restore.start(QStringLiteral(ZAPSHELL_BIN),{"--restore",bad.fileName()});
     QVERIFY(restore.waitForFinished(10000)); QVERIFY(restore.exitCode()!=0); QVERIFY(!restore.readAllStandardError().isEmpty());
     QTest::qWait(2000); QVERIFY(!QFile::exists(dir.path()+"/runtime/zapshell.sock"));
+}
+
+void TestInstance::acquireIsIdempotentForAppLock()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+    zs::InstanceLock lock(socketPath);
+    QString error;
+    QVERIFY2(lock.acquire(&error), qPrintable(error));
+    QVERIFY2(lock.acquire(&error), qPrintable(error));
+
+    zs::InstanceLock other(socketPath);
+    QString otherError;
+    QVERIFY(!other.acquire(&otherError, 0));
+    QVERIFY(!otherError.isEmpty());
+}
+
+void TestInstance::acquireMaintenanceIsIdempotentForMaintenanceLock()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+    zs::InstanceLock lock(socketPath);
+    QString error;
+    QVERIFY2(lock.acquireMaintenance(&error), qPrintable(error));
+    QVERIFY2(lock.acquireMaintenance(&error), qPrintable(error));
+
+    zs::InstanceLock other(socketPath);
+    QString otherError;
+    QVERIFY(!other.acquireMaintenance(&otherError, 0));
+    QVERIFY(!otherError.isEmpty());
+}
+
+void TestInstance::invalidTransitionMaintenanceToAcquirePreservesExclusivity()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+    zs::InstanceLock lock(socketPath);
+    QString error;
+    QVERIFY2(lock.acquireMaintenance(&error), qPrintable(error));
+
+    QString transitionError;
+    QVERIFY(!lock.acquire(&transitionError, 0));
+    QVERIFY2(!transitionError.isEmpty(), "transição inválida deve reportar erro claro");
+
+    zs::InstanceLock other(socketPath);
+    QString otherError;
+    QVERIFY2(!other.acquireMaintenance(&otherError, 0),
+             "transição inválida não deve liberar exclusividade");
+    QVERIFY(!otherError.isEmpty());
+}
+
+void TestInstance::invalidTransitionAcquireToMaintenancePreservesExclusivity()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+    zs::InstanceLock lock(socketPath);
+    QString error;
+    QVERIFY2(lock.acquire(&error), qPrintable(error));
+
+    QString transitionError;
+    QVERIFY(!lock.acquireMaintenance(&transitionError, 0));
+    QVERIFY2(!transitionError.isEmpty(), "transição inválida deve reportar erro claro");
+
+    zs::InstanceLock other(socketPath);
+    QString otherError;
+    QVERIFY2(!other.acquireMaintenance(&otherError, 0),
+             "transição inválida não deve liberar exclusividade");
+    QVERIFY(!otherError.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestInstance)

@@ -28,7 +28,9 @@ public:
     InstanceLock &operator=(const InstanceLock &) = delete;
 
     // true se esta execução é a dona do socket; false se já existe dona (ou
-    // falhou, com `error` preenchido).
+    // falhou, com `error` preenchido). Idempotente para o mesmo modo.
+    // Transições manutenção<->aplicação no mesmo objeto são rejeitadas sem
+    // liberar o descritor original.
     bool acquire(QString *error = nullptr, int waitMs = 0);
     bool acquireMaintenance(QString *error = nullptr, int waitMs = 0);
 
