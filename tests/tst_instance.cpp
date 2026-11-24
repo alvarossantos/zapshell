@@ -946,6 +946,7 @@ void TestInstance::restoreFlowSharedBudgetCapsWaitAndLockContention()
                 QThread::msleep(10);
         }
     });
+    ThreadJoinGuard contenderGuard{&contender, &releaseContention, nullptr};
 
     QElapsedTimer waitReady;
     waitReady.start();
@@ -965,6 +966,7 @@ void TestInstance::restoreFlowSharedBudgetCapsWaitAndLockContention()
     const qint64 elapsed = timer.elapsed();
     releaseContention.store(true);
     contender.join();
+    contenderGuard.t = nullptr;
 
     QVERIFY2(finished, "processo --restore não terminou dentro do limite do teste");
     QVERIFY2(restore.exitCode() != 0,
