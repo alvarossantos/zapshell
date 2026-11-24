@@ -29,7 +29,8 @@ public:
 
     // true se esta execução é a dona do socket; false se já existe dona (ou
     // falhou, com `error` preenchido).
-    bool acquire(QString *error = nullptr);
+    bool acquire(QString *error = nullptr, int waitMs = 0);
+    bool acquireMaintenance(QString *error = nullptr, int waitMs = 0);
 
     // Envia um verbo para a instância dona. Bloqueia até a resposta ou timeout.
     bool send(const QString &verb, QString *reply = nullptr, int timeoutMs = 1500);
@@ -41,7 +42,7 @@ public:
     void setHandler(std::function<QString(const QString &verb)> handler);
 
 private:
-    bool lockAcquire(QString *error);
+    bool lockAcquire(QString *error, int waitMs);
     void lockRelease();
     void handleConnection();
 

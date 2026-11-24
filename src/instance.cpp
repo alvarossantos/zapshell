@@ -9,6 +9,7 @@
 #include <QThread>
 #include <QTimer>
 
+#include <cerrno>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -30,21 +31,45 @@ InstanceLock::~InstanceLock()
     lockRelease();
 }
 
-bool InstanceLock::lockAcquire(QString *error)
+bool InstanceLock::lockAcquire(QString *error, int waitMs)
 {
     const QString lockPath = m_socketPath + QStringLiteral(".lock");
     m_lockFd = ::open(QFile::encodeName(lockPath).constData(),
                       O_CREAT | O_RDWR | O_CLOEXEC, 0600);
     if (m_lockFd < 0) {
+        lockRelease();
         if (error) *error = QStringLiteral("não foi possível abrir o lock: ") + lockPath;
         return false;
     }
-    if (::flock(m_lockFd, LOCK_EX | LOCK_NB) != 0) {
+
+    QElapsedTimer timer;
+    timer.start();
+    while (true) {
+        if (::flock(m_lockFd, LOCK_EX | LOCK_NB) == 0)
+            return true;
+
+        const int flockError = errno;
+        if (flockError == EINTR || flockError == EAGAIN || flockError == EWOULDBLOCK) {
+            if (waitMs > 0 && timer.elapsed() < waitMs) {
+                QThread::msleep(50);
+                continue;
+            }
+            lockRelease();
+            if (error) {
+                if (waitMs == 0)
+                    *error = QStringLiteral("inicialização concorrente: ") + lockPath;
+                else
+                    *error = QStringLiteral("não foi possível adquirir o lock em %1 ms: %2")
+                                 .arg(waitMs).arg(lockPath);
+            }
+            return false;
+        }
+
         lockRelease();
-        if (error) *error = QStringLiteral("inicialização concorrente: ") + lockPath;
+        if (error)
+            *error = QStringLiteral("não foi possível adquirir o lock: ") + lockPath;
         return false;
     }
-    return true;
 }
 
 void InstanceLock::lockRelease()
@@ -56,16 +81,17 @@ void InstanceLock::lockRelease()
     }
 }
 
-bool InstanceLock::acquire(QString *error)
+bool InstanceLock::acquire(QString *error, int waitMs)
 {
     if (!m_server) {
-        if (!lockAcquire(error))
+        if (!lockAcquire(error, waitMs))
             return false;
 
         QLocalSocket probe;
         probe.connectToServer(m_socketPath);
         if (probe.waitForConnected(300)) {
             probe.disconnectFromServer();
+            lockRelease();
             if (error)
                 *error = QStringLiteral("já existe uma instância em execução");
             return false;
@@ -80,6 +106,7 @@ bool InstanceLock::acquire(QString *error)
         const bool statOk = ::lstat(QFile::encodeName(m_socketPath).constData(), &st) == 0;
         const bool socketFile = statOk && S_ISSOCK(st.st_mode);
         if (!removable || (statOk && !socketFile)) {
+            lockRelease();
             if (error)
                 *error = QStringLiteral("não foi possível confirmar socket órfão: ") + m_socketPath;
             return false;
@@ -88,6 +115,7 @@ bool InstanceLock::acquire(QString *error)
 
         m_server = new QLocalServer(this);
         if (!m_server->listen(m_socketPath)) {
+            lockRelease();
             if (error)
                 *error = QStringLiteral("não foi possível abrir %1: %2")
                              .arg(m_socketPath, m_server->errorString());
@@ -98,6 +126,13 @@ bool InstanceLock::acquire(QString *error)
         connect(m_server, &QLocalServer::newConnection, this, &InstanceLock::handleConnection);
     }
     return true;
+}
+
+bool InstanceLock::acquireMaintenance(QString *error, int waitMs)
+{
+    if (m_lockFd >= 0)
+        return true;
+    return lockAcquire(error, waitMs);
 }
 
 bool InstanceLock::waitUntilReleased(const QString &socketPath, int timeoutMs)

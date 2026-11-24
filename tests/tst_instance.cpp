@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QFile>
+#include <QElapsedTimer>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QTemporaryDir>
@@ -15,6 +16,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <thread>
+#include <memory>
 
 #include "instance.h"
 
@@ -31,6 +34,9 @@ private slots:
     void doesNotDeleteRegularFileAtSocketPath();
     void idleConnectionIsClosed();
     void concurrentAcquireHasSingleOwner();
+    void failedAcquireReleasesLock();
+    void waitBudgetIsNotReset();
+    void maintenanceAcquireIsExclusive();
 };
 
 void TestInstance::secondInstanceSendsVerbToFirst()
@@ -215,6 +221,75 @@ void TestInstance::concurrentAcquireHasSingleOwner()
 
     const int owners = std::count(won.begin(), won.end(), true);
     QCOMPARE(owners, 1);
+}
+
+void TestInstance::failedAcquireReleasesLock()
+{
+    {
+        QTemporaryDir dir;
+        const QString socketPath = dir.path() + "/t.sock";
+        QFile victim(socketPath);
+        QVERIFY(victim.open(QIODevice::WriteOnly));
+        victim.close();
+
+        zs::InstanceLock a(socketPath);
+        QString error;
+        QVERIFY(!a.acquire(&error));
+        QVERIFY(QFile::remove(socketPath));
+        zs::InstanceLock b(socketPath);
+        QString bErr;
+        QVERIFY2(b.acquireMaintenance(&bErr, 0), qPrintable(bErr));
+    }
+    {
+        QTemporaryDir dir;
+        const QString socketPath = dir.path() + "/missing/t.sock";
+        zs::InstanceLock a(socketPath);
+        QString error;
+        QVERIFY(!a.acquire(&error));
+    }
+}
+
+void TestInstance::waitBudgetIsNotReset()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+    auto holder = std::make_unique<zs::InstanceLock>(socketPath);
+    QVERIFY(holder->acquireMaintenance());
+    std::atomic<bool> finished{false};
+    bool acquired = true;
+    qint64 elapsed = 0;
+    std::thread attempt([&] {
+        zs::InstanceLock other(socketPath);
+        QString error;
+        QElapsedTimer timer;
+        timer.start();
+        acquired = other.acquire(&error, 300);
+        elapsed = timer.elapsed();
+        finished.store(true);
+    });
+    QTest::qWait(2000);
+    const bool completedWithinGuard = finished.load();
+    holder.reset();
+    attempt.join();
+    QVERIFY(completedWithinGuard);
+    QVERIFY(!acquired);
+    QVERIFY2(elapsed >= 250 && elapsed <= 900, qPrintable(QString::number(elapsed)));
+}
+
+void TestInstance::maintenanceAcquireIsExclusive()
+{
+    QTemporaryDir dir;
+    const QString socketPath = dir.path() + "/t.sock";
+    {
+        zs::InstanceLock holder(socketPath);
+        QVERIFY(holder.acquireMaintenance());
+        zs::InstanceLock second(socketPath);
+        QString error;
+        QVERIFY(!second.acquireMaintenance(&error, 0));
+        QVERIFY(error.contains(QStringLiteral("lock")));
+    }
+    zs::InstanceLock third(socketPath);
+    QVERIFY(third.acquireMaintenance());
 }
 
 QTEST_GUILESS_MAIN(TestInstance)
