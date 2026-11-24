@@ -46,33 +46,35 @@ int backupFlow()
             const int waitRemaining = remainingBudgetMs(budget);
             if (waitRemaining <= 0) {
                 QTextStream(stderr)
-                    << "zapshell: orçamento de manutenção esgotado (15000 ms); backup abortado sem acessar o perfil"
-                    << Qt::endl;
+                    << "zapshell: orçamento de manutenção esgotado (" << kMaintenanceBudgetMs
+                    << " ms); backup abortado sem acessar o perfil" << Qt::endl
+                    << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
                 return 1;
             }
             if (!zs::InstanceLock::waitUntilReleased(socket, waitRemaining)) {
-                QTextStream(stderr) << "zapshell: instância não encerrou a tempo (15000 ms); backup abortado" << Qt::endl;
+                QTextStream(stderr)
+                    << "zapshell: instância não encerrou a tempo (" << kMaintenanceBudgetMs
+                    << " ms); backup abortado" << Qt::endl
+                    << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
                 return 1;
             }
         }
         const int lockRemaining = remainingBudgetMs(budget);
         if (lockRemaining <= 0) {
             QTextStream(stderr)
-                << "zapshell: orçamento de manutenção esgotado (15000 ms); backup abortado sem acessar o perfil"
-                << Qt::endl
+                << "zapshell: orçamento de manutenção esgotado (" << kMaintenanceBudgetMs
+                << " ms); backup abortado sem acessar o perfil" << Qt::endl
                 << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
             return 1;
         }
         if (!lock.acquireMaintenance(&error, lockRemaining)) {
-            QTextStream(stderr) << "zapshell: falha ao adquirir lock de manutenção (15000 ms): " << error << Qt::endl;
-            QString probe;
-            if (lock.send(QStringLiteral("stats"), &probe))
-                relaunch = false; // outra instância ativa venceu a disputa
-            else
-                relaunch = wasRunning; // perfil íntegro, sem instância ativa: preservar
+            QTextStream(stderr)
+                << "zapshell: falha ao adquirir lock de manutenção (" << kMaintenanceBudgetMs
+                << " ms): " << error << Qt::endl
+                << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
+            relaunch = false;
         } else {
-            // Só é seguro reiniciar após tomar posse exclusiva. Se outro
-            // mantenedor venceu a disputa, não iniciar um perfil concorrente.
+            // Só é seguro reiniciar após tomar posse exclusiva.
             relaunch = wasRunning;
             if (zs::createBackup(zs::paths::profileDir(), zs::paths::backupDir(),
                                     QDateTime::currentDateTime(), &archive, &error)) {
@@ -104,23 +106,31 @@ int restoreFlow(const QString &archive)
         const int waitRemaining = remainingBudgetMs(budget);
         if (waitRemaining <= 0) {
             QTextStream(stderr)
-                << "zapshell: orçamento de manutenção esgotado (15000 ms); restore abortado sem acessar o perfil"
-                << Qt::endl;
+                << "zapshell: orçamento de manutenção esgotado (" << kMaintenanceBudgetMs
+                << " ms); restore abortado sem acessar o perfil" << Qt::endl
+                << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
             return 1;
         }
         if (!zs::InstanceLock::waitUntilReleased(socket, waitRemaining)) {
-            QTextStream(stderr) << "zapshell: socket ainda presente após 15000 ms; restore abortado" << Qt::endl;
+            QTextStream(stderr)
+                << "zapshell: socket ainda presente após " << kMaintenanceBudgetMs
+                << " ms; restore abortado" << Qt::endl
+                << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
             return 1;
         }
         const int lockRemaining = remainingBudgetMs(budget);
         if (lockRemaining <= 0) {
             QTextStream(stderr)
-                << "zapshell: orçamento de manutenção esgotado (15000 ms); restore abortado sem acessar o perfil"
-                << Qt::endl;
+                << "zapshell: orçamento de manutenção esgotado (" << kMaintenanceBudgetMs
+                << " ms); restore abortado sem acessar o perfil" << Qt::endl
+                << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
             return 1;
         }
         if (!lock.acquireMaintenance(&error, lockRemaining)) {
-            QTextStream(stderr) << "zapshell: falha ao adquirir lock de manutenção (15000 ms): " << error << Qt::endl;
+            QTextStream(stderr)
+                << "zapshell: falha ao adquirir lock de manutenção (" << kMaintenanceBudgetMs
+                << " ms): " << error << Qt::endl
+                << "zapshell: manutenção abortada; relance manualmente se necessário" << Qt::endl;
             return 1;
         }
         restored = zs::restoreBackup(archive, zs::paths::profileDir(), &error);
