@@ -878,8 +878,9 @@ void TestInstance::backupFlowSharedBudgetCapsWaitAndLockContention()
         QTest::qWait(10);
     QVERIFY2(backupRequested.load(), "backupFlow não enviou pedido de backup ao app vivo");
 
-    // Mantém o socket presente brevemente para consumir parte do orçamento.
-    QTest::qWait(800);
+    // ZS-10: consome ~3s no waitUntilReleased (socket vivo) e mantém contenção de
+    // lock após liberação; orçamento único de 15s deve esgotar em <16.5s.
+    QTest::qWait(3000);
     server.close();
     QLocalServer::removeServer(socketPath);
 
@@ -934,6 +935,12 @@ void TestInstance::restoreFlowSharedBudgetCapsWaitAndLockContention()
 
     const QString socketPath = base + "/runtime/zapshell.sock";
     QLocalServer::removeServer(socketPath);
+    // ZS-10: placeholder regular consome waitUntilReleased (QFile::exists) sem
+    // criar socket IPC vivo; lock.send("stats") falha como esperado.
+    QFile placeholder(socketPath);
+    QVERIFY2(placeholder.open(QIODevice::WriteOnly), qPrintable(placeholder.errorString()));
+    placeholder.write("busy");
+    placeholder.close();
 
     std::atomic<bool> contentionReady{false};
     std::atomic<bool> releaseContention{false};
@@ -962,7 +969,12 @@ void TestInstance::restoreFlowSharedBudgetCapsWaitAndLockContention()
                   {QStringLiteral("--restore"), archive});
     QVERIFY(restore.waitForStarted(3000));
 
-    const bool finished = restore.waitForFinished(19000);
+    // Consome ~3s no waitUntilReleased antes de liberar placeholder e medir
+    // contenção de lock sob o mesmo orçamento de 15s.
+    QTest::qWait(3000);
+    QFile::remove(socketPath);
+
+    const bool finished = restore.waitForFinished(17000);
     const qint64 elapsed = timer.elapsed();
     releaseContention.store(true);
     contender.join();
