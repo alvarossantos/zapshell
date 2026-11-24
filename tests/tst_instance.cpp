@@ -51,6 +51,7 @@ private slots:
     void ipcCommandsUnchanged();
     void shutdownToMaintenanceContention();
     void restoreFailureDoesNotRelaunch();
+    void backupFlowSharedBudgetCapsWaitAndLockContention();
     void acquireIsIdempotentForAppLock();
     void acquireMaintenanceIsIdempotentForMaintenanceLock();
     void invalidTransitionMaintenanceToAcquirePreservesExclusivity();
@@ -519,6 +520,105 @@ void TestInstance::restoreFailureDoesNotRelaunch()
     QByteArray err; ChildProcess restore; configureChild(restore,dir.path()); restore.start(QStringLiteral(ZAPSHELL_BIN),{"--restore",bad.fileName()});
     QVERIFY(restore.waitForFinished(10000)); QVERIFY(restore.exitCode()!=0); QVERIFY(!restore.readAllStandardError().isEmpty());
     QTest::qWait(2000); QVERIFY(!QFile::exists(dir.path()+"/runtime/zapshell.sock"));
+}
+
+void TestInstance::backupFlowSharedBudgetCapsWaitAndLockContention()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString base = dir.path();
+    QVERIFY(QDir().mkpath(base + "/runtime"));
+    QVERIFY(QDir().mkpath(base + "/data/zapshell/profile"));
+    QFile marker(base + "/data/zapshell/profile/keep.txt");
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("original");
+    marker.close();
+    QFile readBefore(marker.fileName());
+    QVERIFY(readBefore.open(QIODevice::ReadOnly));
+    const QByteArray original = readBefore.readAll();
+    readBefore.close();
+
+    const QString socketPath = base + "/runtime/zapshell.sock";
+    QLocalServer::removeServer(socketPath);
+    QLocalServer server;
+    QVERIFY2(server.listen(socketPath), qPrintable(server.errorString()));
+
+    std::atomic<bool> backupRequested{false};
+    connect(&server, &QLocalServer::newConnection, &server, [&server, &backupRequested]() {
+        while (QLocalSocket *socket = server.nextPendingConnection()) {
+            connect(socket, &QLocalSocket::readyRead, socket, [socket, &backupRequested]() {
+                if (!socket->canReadLine())
+                    return;
+                const QString verb = QString::fromUtf8(socket->readLine()).trimmed();
+                if (verb == QLatin1String("backup"))
+                    backupRequested.store(true);
+                socket->write(QByteArray("ok\n"));
+                socket->flush();
+                socket->disconnectFromServer();
+                socket->deleteLater();
+            });
+            connect(socket, &QLocalSocket::disconnected, socket, &QLocalSocket::deleteLater);
+        }
+    });
+
+    std::atomic<bool> contentionReady{false};
+    std::atomic<bool> releaseContention{false};
+    std::thread contender([&] {
+        zs::InstanceLock holder(socketPath);
+        QString lockError;
+        if (holder.acquireMaintenance(&lockError, 20000)) {
+            contentionReady.store(true);
+            while (!releaseContention.load())
+                QThread::msleep(10);
+        }
+    });
+
+    QElapsedTimer waitReady;
+    waitReady.start();
+    while (!contentionReady.load() && waitReady.elapsed() < 3000)
+        QTest::qWait(10);
+    QVERIFY2(contentionReady.load(), "contendor de manutenção não adquiriu o lock");
+
+    QProcess backup;
+    configureChild(backup, base);
+    QElapsedTimer timer;
+    timer.start();
+    backup.start(QStringLiteral(ZAPSHELL_BIN), {QStringLiteral("--backup")});
+    QVERIFY(backup.waitForStarted(3000));
+
+    QElapsedTimer requestWait;
+    requestWait.start();
+    while (!backupRequested.load() && requestWait.elapsed() < 5000)
+        QTest::qWait(10);
+    QVERIFY2(backupRequested.load(), "backupFlow não enviou pedido de backup ao app vivo");
+
+    // Mantém o socket presente por ~8s para simular app viva demorando a sair.
+    QTest::qWait(8000);
+    server.close();
+    QLocalServer::removeServer(socketPath);
+
+    const bool finished = backup.waitForFinished(20000);
+    const qint64 elapsed = timer.elapsed();
+    releaseContention.store(true);
+    contender.join();
+
+    QVERIFY2(finished, "processo --backup não terminou dentro do limite do teste");
+    QVERIFY2(backup.exitCode() != 0, "backup deveria falhar quando orçamento total esgota");
+    QVERIFY2(elapsed < 16500,
+             qPrintable(QStringLiteral("orçamento total excedido: %1 ms").arg(elapsed)));
+
+    const QByteArray err = backup.readAllStandardError();
+    QVERIFY2(err.contains("15000 ms") || err.toLower().contains("orçamento")
+                 || err.toLower().contains("orcamento") || err.contains("tempo"),
+             qPrintable(QStringLiteral("erro pouco claro: %1").arg(QString::fromLocal8Bit(err))));
+
+    const QStringList backups = QDir(base + "/data/zapshell/backups")
+                                    .entryList({QStringLiteral("*.tar.gz")}, QDir::Files);
+    QVERIFY2(backups.isEmpty(), "backup não deve ser criado sem acesso exclusivo seguro ao perfil");
+
+    QFile readAfter(marker.fileName());
+    QVERIFY(readAfter.open(QIODevice::ReadOnly));
+    QCOMPARE(readAfter.readAll(), original);
 }
 
 void TestInstance::acquireIsIdempotentForAppLock()
