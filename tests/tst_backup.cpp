@@ -29,6 +29,7 @@ private slots:
     void stalePartialIsNotLeftBehind();
     void existingArchiveIsReplacedWithoutGap();
     void failedPublishKeepsPreviousArchive();
+    void restoredProfileBecomesPrivate();
 };
 
 void TestBackup::keepsNewestFour()
@@ -369,6 +370,36 @@ void TestBackup::failedPublishKeepsPreviousArchive()
     QVERIFY(QDir(archiveB).exists());
     QVERIFY(!retryError.isEmpty());
     QVERIFY(!QFile::exists(archiveB + QStringLiteral(".partial")));
+}
+
+void TestBackup::restoredProfileBecomesPrivate()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.path() + "/src";
+    const QString profile = dir.path() + "/profile";
+    QVERIFY(QDir().mkpath(source + "/profile"));
+    QVERIFY(QFile::setPermissions(source + "/profile",
+                                  QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner |
+                                      QFile::ReadGroup | QFile::ExeGroup | QFile::ReadOther
+                                      | QFile::ExeOther));
+    QFile session(source + "/profile/session.dat");
+    QVERIFY(session.open(QIODevice::WriteOnly));
+    session.write("sessao");
+    session.close();
+
+    QProcess tar;
+    tar.start(QStringLiteral("tar"),
+              {QStringLiteral("-czf"), dir.path() + "/old.tar.gz", QStringLiteral("-C"), source,
+               QStringLiteral("profile")});
+    QVERIFY(tar.waitForFinished(10000));
+    QCOMPARE(tar.exitCode(), 0);
+
+    QString error;
+    QVERIFY2(zs::restoreBackup(dir.path() + "/old.tar.gz", profile, &error), qPrintable(error));
+    QCOMPARE(QFileInfo(profile).permissions(),
+             QFile::Permissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                                | QFile::ReadUser | QFile::WriteUser | QFile::ExeUser));
 }
 
 QTEST_GUILESS_MAIN(TestBackup)

@@ -235,6 +235,9 @@ bool restoreBackup(const QString &archive, const QString &profileDir, QString *e
                          : QStringLiteral("não foi possível instalar o perfil restaurado");
         return false;
     }
+    // O archive pode ter sido feito com umask permissiva; --no-same-permissions
+    // preserva o modo gravado nele, então o perfil restaurado precisa ser corrigido.
+    paths::ensurePrivateDir(profileDir);
     return true;
 }
 

@@ -81,8 +81,9 @@ systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS
 
 Na inicialização, os diretórios de dados, perfil e cache são criados — e os já
 existentes corrigidos — com modo `0700`; o diretório de backups recebe o mesmo
-modo quando um backup ou restore é feito. Cookies, IndexedDB, histórico e mídia
-não ficam legíveis por outros usuários locais.
+modo quando um backup é feito, e o perfil restaurado é corrigido no `--restore`
+(um archive antigo pode carregar modo permissivo). Cookies, IndexedDB, histórico
+e mídia não ficam legíveis por outros usuários locais.
 
 Backups são `zapshell-AAAAAMMDD-HHMMSS.tar.gz`, com retenção dos 4 mais
 recentes. O app grava um `.partial`, valida o archive com `tar -tzf` e só então
