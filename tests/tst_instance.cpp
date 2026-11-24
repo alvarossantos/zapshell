@@ -441,24 +441,33 @@ void TestInstance::restoreBlocksProfileStartup()
     QElapsedTimer probe;
     probe.start();
     while (probe.elapsed() < 4000 && restore.state() != QProcess::NotRunning) {
-        zs::InstanceLock lockProbe(socket);
-        QString probeErr;
-        if (!lockProbe.acquireMaintenance(&probeErr, 0)) {
+        bool restoreHoldingLock = false;
+        {
+            zs::InstanceLock lockProbe(socket);
+            QString probeErr;
+            // Probe bem-sucedido não deve segurar lock; escopo pequeno libera RAII imediatamente.
+            restoreHoldingLock = !lockProbe.acquireMaintenance(&probeErr, 0);
+        }
+        if (restoreHoldingLock) {
             observedRestoreLock = true;
             if (startup.program().isEmpty()) {
                 configureChild(startup, dir.path());
                 startup.start(QStringLiteral(ZAPSHELL_BIN), {"--hidden"});
                 QVERIFY(startup.waitForStarted(3000));
             }
-            QTest::qWait(120);
-            if (restore.state() != QProcess::NotRunning)
-                break;
-            socketAppearedDuringRestoreLock = QFile::exists(socket);
-            if (!socketAppearedDuringRestoreLock)
-                break;
-        } else {
-            QThread::msleep(10);
+            // Após observar lock, apenas polling leve por socket; sem re-probe intrusivo.
+            QElapsedTimer contentionWindow;
+            contentionWindow.start();
+            while (contentionWindow.elapsed() < 500 && restore.state() != QProcess::NotRunning) {
+                if (QFile::exists(socket)) {
+                    socketAppearedDuringRestoreLock = true;
+                    break;
+                }
+                QTest::qWait(20);
+            }
+            break;
         }
+        QThread::msleep(10);
     }
 
     if (!restore.waitForFinished(20000)) {
@@ -848,6 +857,7 @@ void TestInstance::backupFlowSharedBudgetCapsWaitAndLockContention()
                 QThread::msleep(10);
         }
     });
+    ThreadJoinGuard contenderGuard{&contender, &releaseContention, nullptr};
 
     QElapsedTimer waitReady;
     waitReady.start();
@@ -877,6 +887,7 @@ void TestInstance::backupFlowSharedBudgetCapsWaitAndLockContention()
     const qint64 elapsed = timer.elapsed();
     releaseContention.store(true);
     contender.join();
+    contenderGuard.t = nullptr;
 
     QVERIFY2(finished, "processo --backup não terminou dentro do limite do teste");
     QVERIFY2(backup.exitCode() != 0, "backup deveria falhar quando orçamento total esgota");
