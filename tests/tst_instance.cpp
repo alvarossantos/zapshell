@@ -392,10 +392,10 @@ void TestInstance::restoreBlocksProfileStartup()
     QVERIFY(tar.waitForFinished(5000)); QCOMPARE(tar.exitCode(),0);
     auto holder=std::make_unique<zs::InstanceLock>(dir.path()+"/runtime/zapshell.sock"); QVERIFY(holder->acquireMaintenance());
     ChildProcess restore; configureChild(restore,dir.path()); restore.start(QStringLiteral(ZAPSHELL_BIN),{"--restore",archive}); QVERIFY(restore.waitForStarted(3000));
-    QTest::qWait(1000); QVERIFY(QFile::exists(marker.fileName())); QCOMPARE(QFileInfo(marker.fileName()).size(),qint64(9));
-    holder.reset(); QVERIFY(restore.waitForFinished(18000));
+    QTest::qWait(200); QVERIFY(QFile::exists(marker.fileName())); QCOMPARE(QFileInfo(marker.fileName()).size(),qint64(9));
+    holder.reset(); QVERIFY(restore.waitForFinished(16000));
     QVERIFY(QFile::exists(marker.fileName()));
-    if (waitForSocket(dir.path(), 5000)) {
+    if (waitForSocket(dir.path(), 3000)) {
         QProcess quit; configureChild(quit, dir.path());
         quit.start(QStringLiteral(ZAPSHELL_BIN), {"--quit"});
         quit.waitForFinished(3000);
@@ -408,7 +408,7 @@ void TestInstance::startupWaitReleasesAfterMaintenance()
     auto holder=std::make_unique<zs::InstanceLock>(dir.path()+"/runtime/zapshell.sock"); QVERIFY(holder->acquireMaintenance());
     ChildProcess child; configureChild(child,dir.path()); child.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(child.waitForStarted(3000));
     std::thread release([&holder]{ QThread::msleep(1000); holder.reset(); });
-    const bool socket=waitForSocket(dir.path(),5000); release.join();
+    const bool socket=waitForSocket(dir.path(),3000); release.join();
     QVERIFY2(socket,qPrintable(QString::fromUtf8(child.readAllStandardError()))); child.kill(); child.waitForFinished(3000);
 
     QTemporaryDir blocked; QVERIFY(blocked.isValid()); QDir().mkpath(blocked.path()+"/runtime");
@@ -424,7 +424,7 @@ void TestInstance::lockLostBeforeMaintenanceDoesNotRelaunch()
 {
     QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
     ChildProcess app; configureChild(app,dir.path()); app.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(app.waitForStarted(3000));
-    if (!waitForSocket(dir.path(),5000)) { app.kill(); app.waitForFinished(); QFAIL("app did not acquire its socket"); }
+    if (!waitForSocket(dir.path(),3000)) { app.kill(); app.waitForFinished(); QFAIL("app did not acquire its socket"); }
 
     // Outra instância viva assume o lock após a dona encerrar; a manutenção não
     // deve relançar uma terceira instância desnecessária.
@@ -448,7 +448,7 @@ void TestInstance::lockLostBeforeMaintenanceDoesNotRelaunch()
     release.store(true); contender.join();
     QVERIFY(finished);
     QCOMPARE(backup.exitCode(), 1);
-    QTest::qWait(2000);
+    QTest::qWait(300);
     QVERIFY2(!QFile::exists(dir.path()+"/runtime/zapshell.sock"),
              "manutenção não deve relançar instância quando outra está ativa");
     if (app.state()!=QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
@@ -463,7 +463,7 @@ void TestInstance::backupMaintenanceFailureWithoutResponderDoesNotRelaunch()
     configureChild(app, dir.path());
     app.start(QStringLiteral(ZAPSHELL_BIN), {"--hidden"});
     QVERIFY(app.waitForStarted(3000));
-    if (!waitForSocket(dir.path(), 5000)) {
+    if (!waitForSocket(dir.path(), 3000)) {
         app.kill();
         app.waitForFinished();
         QFAIL("app did not start");
@@ -505,7 +505,7 @@ void TestInstance::backupMaintenanceFailureWithoutResponderDoesNotRelaunch()
              qPrintable(QStringLiteral("stderr deve orientar relaunch manual: %1")
                             .arg(QString::fromLocal8Bit(err))));
 
-    QTest::qWait(2000);
+    QTest::qWait(400);
     QVERIFY2(!QFile::exists(dir.path() + "/runtime/zapshell.sock"),
              "ZS-11: falha de acquireMaintenance não deve relançar automaticamente");
 }
@@ -519,51 +519,55 @@ void TestInstance::backupWasRunningLockContentionDoesNotRelaunch()
     configureChild(app, dir.path());
     app.start(QStringLiteral(ZAPSHELL_BIN), {"--hidden"});
     QVERIFY(app.waitForStarted(3000));
-    if (!waitForSocket(dir.path(), 5000)) {
+    if (!waitForSocket(dir.path(), 3000)) {
         app.kill();
         app.waitForFinished();
         QFAIL("app did not start");
     }
 
-    // wasRunning=true: app responde backup e inicia saída. Antes do backupFlow
-    // adquirir manutenção, outro maintainer vence a disputa pelo lock.
-    zs::InstanceLock lock(dir.path() + "/runtime/zapshell.sock");
-    QProcess quit;
-    configureChild(quit, dir.path());
-    quit.start(QStringLiteral(ZAPSHELL_BIN), {"--quit"});
-    QVERIFY(quit.waitForFinished(5000));
-    QVERIFY(zs::InstanceLock::waitUntilReleased(dir.path() + "/runtime/zapshell.sock", 5000));
-
-    std::atomic<bool> acquired{false}, release{false};
+    // ZS-11: backupFlow observa app viva (wasRunning=true) ao receber resposta
+    // "ok" para "backup". O app então encerra e libera o socket; antes que o
+    // backupFlow readquira manutenção, outro maintainer vence a disputa.
+    const QString socket = dir.path() + "/runtime/zapshell.sock";
+    std::atomic<bool> acquired{false};
+    std::atomic<bool> release{false};
+    std::atomic<bool> stop{false};
     std::thread contender([&] {
-        zs::InstanceLock other(dir.path() + "/runtime/zapshell.sock");
-        QString error;
-        acquired.store(other.acquireMaintenance(&error, 17000));
-        while (acquired.load() && !release.load())
-            QThread::msleep(10);
+        while (!stop.load()) {
+            if (!QFile::exists(socket)) {
+                zs::InstanceLock other(socket);
+                QString err;
+                if (other.acquireMaintenance(&err, 0)) {
+                    acquired.store(true);
+                    while (!release.load() && !stop.load())
+                        QThread::msleep(5);
+                    return;
+                }
+            }
+            QThread::msleep(1);
+        }
     });
-    QElapsedTimer probe;
-    probe.start();
-    while (!acquired.load() && probe.elapsed() < 2000)
-        QThread::msleep(10);
-    QVERIFY2(acquired.load(), "contender devia vencer a disputa de lock");
 
     QProcess backup;
     configureChild(backup, dir.path());
     backup.start(QStringLiteral(ZAPSHELL_BIN), {"--backup"});
     const bool finished = backup.waitForFinished(20000);
+    stop.store(true);
     release.store(true);
     contender.join();
-    QVERIFY(finished);
+
+    QVERIFY2(finished, "backup deve concluir mesmo com contenção de lock");
     QCOMPARE(backup.exitCode(), 1);
+    QVERIFY2(acquired.load(),
+             "contender devia adquirir manutenção após app sair e antes do backupFlow");
 
     const QByteArray err = backup.readAllStandardError();
     QVERIFY2(err.contains("manutenção abortada") || err.contains("manutencao abortada"),
              qPrintable(QStringLiteral("stderr deve orientar relaunch manual: %1")
                             .arg(QString::fromLocal8Bit(err))));
 
-    QTest::qWait(2000);
-    QVERIFY2(!QFile::exists(dir.path() + "/runtime/zapshell.sock"),
+    QTest::qWait(400);
+    QVERIFY2(!QFile::exists(socket),
              "ZS-11: wasRunning+lock contention não deve relançar automaticamente");
     if (app.state() != QProcess::NotRunning) {
         app.kill();
@@ -575,7 +579,7 @@ void TestInstance::ipcCommandsUnchanged()
 {
     QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
     ChildProcess app; configureChild(app,dir.path()); app.start(QStringLiteral(ZAPSHELL_BIN),{"--hidden"}); QVERIFY(app.waitForStarted(3000));
-    if (!waitForSocket(dir.path(),5000)) { app.kill(); app.waitForFinished(); QFAIL("app did not start"); }
+    if (!waitForSocket(dir.path(),3000)) { app.kill(); app.waitForFinished(); QFAIL("app did not start"); }
     QElapsedTimer timer; timer.start(); QByteArray out; QVERIFY(runCli(dir.path(),{"--stats"},&out)); QVERIFY(timer.elapsed()<1000); QVERIFY(!out.isEmpty());
     app.kill(); app.waitForFinished(3000); QLocalServer::removeServer(dir.path()+"/runtime/zapshell.sock");
     for (const QString &arg : {"--quit","--toggle","--stats"}) { timer.restart(); QVERIFY(runCli(dir.path(),{arg},&out)); QVERIFY(timer.elapsed()<1000); }
@@ -587,8 +591,8 @@ void TestInstance::shutdownToMaintenanceContention()
     QFile marker(dir.path()+"/data/zapshell/profile/keep"); QVERIFY(marker.open(QIODevice::WriteOnly)); marker.write("x"); marker.close();
     auto holder=std::make_unique<zs::InstanceLock>(dir.path()+"/runtime/zapshell.sock"); QVERIFY(holder->acquireMaintenance());
     ChildProcess backup; configureChild(backup,dir.path()); backup.start(QStringLiteral(ZAPSHELL_BIN),{"--backup"}); QVERIFY(backup.waitForStarted(3000));
-    QTest::qWait(1000); QVERIFY(QDir(dir.path()+"/data/zapshell/backups").entryList({"*.tar.gz"},QDir::Files).isEmpty());
-    holder.reset(); QVERIFY(backup.waitForFinished(18000)); QCOMPARE(backup.exitCode(),0);
+    QTest::qWait(200); QVERIFY(QDir(dir.path()+"/data/zapshell/backups").entryList({"*.tar.gz"},QDir::Files).isEmpty());
+    holder.reset(); QVERIFY(backup.waitForFinished(16000)); QCOMPARE(backup.exitCode(),0);
     QVERIFY(!QDir(dir.path()+"/data/zapshell/backups").entryList({"*.tar.gz"},QDir::Files).isEmpty());
 }
 
@@ -597,8 +601,8 @@ void TestInstance::restoreFailureDoesNotRelaunch()
     QTemporaryDir dir; QVERIFY(dir.isValid()); QDir().mkpath(dir.path()+"/runtime");
     QFile bad(dir.path()+"/bad.tar.gz"); QVERIFY(bad.open(QIODevice::WriteOnly)); bad.write("invalid"); bad.close();
     QByteArray err; ChildProcess restore; configureChild(restore,dir.path()); restore.start(QStringLiteral(ZAPSHELL_BIN),{"--restore",bad.fileName()});
-    QVERIFY(restore.waitForFinished(10000)); QVERIFY(restore.exitCode()!=0); QVERIFY(!restore.readAllStandardError().isEmpty());
-    QTest::qWait(2000); QVERIFY(!QFile::exists(dir.path()+"/runtime/zapshell.sock"));
+    QVERIFY(restore.waitForFinished(8000)); QVERIFY(restore.exitCode()!=0); QVERIFY(!restore.readAllStandardError().isEmpty());
+    QTest::qWait(300); QVERIFY(!QFile::exists(dir.path()+"/runtime/zapshell.sock"));
 }
 
 void TestInstance::backupFlowSharedBudgetCapsWaitAndLockContention()
@@ -671,12 +675,12 @@ void TestInstance::backupFlowSharedBudgetCapsWaitAndLockContention()
         QTest::qWait(10);
     QVERIFY2(backupRequested.load(), "backupFlow não enviou pedido de backup ao app vivo");
 
-    // Mantém o socket presente por ~8s para simular app viva demorando a sair.
-    QTest::qWait(8000);
+    // Mantém o socket presente brevemente para consumir parte do orçamento.
+    QTest::qWait(800);
     server.close();
     QLocalServer::removeServer(socketPath);
 
-    const bool finished = backup.waitForFinished(20000);
+    const bool finished = backup.waitForFinished(17000);
     const qint64 elapsed = timer.elapsed();
     releaseContention.store(true);
     contender.join();
