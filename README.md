@@ -36,6 +36,10 @@ zapshell --restore ARQ  # exige app parado; valida o archive antes de extrair
 zapshell --quit         # encerra
 ```
 
+`--stats` lê a última amostra de um coletor assíncrono, atualizado a cada 1 s
+por `QTimer`; o handler IPC apenas consulta esse valor, sem bloquear a thread da
+interface enquanto mede RSS/CPU da árvore de processos.
+
 No tray: mostrar/ocultar, recarregar, backup agora, silenciar e sair. Fechar a
 janela apenas a esconde; `Ctrl+Q` pede confirmação antes de encerrar. `Ctrl+F`
 abre a busca na conversa, `Ctrl+R` recarrega, `Ctrl+Shift+M` alterna silêncio.
@@ -76,11 +80,27 @@ systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS
 | Backups | `$XDG_DATA_HOME/zapshell/backups` |
 | Socket IPC | `$XDG_RUNTIME_DIR/zapshell.sock` |
 
+Na inicialização, os diretórios de dados, perfil e cache são criados — e os já
+existentes corrigidos — com modo `0700`; o diretório de backups recebe o mesmo
+modo quando um backup ou restore é feito. Cookies, IndexedDB, histórico e mídia
+não ficam legíveis por outros usuários locais.
+
 Backups são `zapshell-AAAAAMMDD-HHMMSS.tar.gz`, com retenção dos 4 mais
-recentes. `--restore` recusa nomes com `..`, absolutos e qualquer membro que não
-seja arquivo/diretório, extrai em staging e guarda o perfil anterior como
-`profile.before-restore-<timestamp>`. Nunca tarre o perfil com o app rodando:
-use `--backup`.
+recentes. O app grava um `.partial`, valida o archive com `tar -tzf` e só então
+publica o nome final com `rename()` atômico (POSIX, no mesmo filesystem): o
+archive anterior é substituído sem deixar o caminho vazio e uma falha na
+publicação preserva o backup anterior e remove o `.partial`. `--restore` recusa
+nomes com `..`, absolutos, links simbólicos e qualquer membro que não seja
+arquivo/diretório; a varredura do staging inclui ocultos e arquivos de sistema
+(`QDir::Hidden | QDir::System`) e os tipos no archive são conferidos pela
+listagem verbose do `tar`. A extração acontece em staging e o perfil anterior é
+guardado como `profile.before-restore-<timestamp>`. Nunca tarre o perfil com o
+app rodando: use `--backup`.
+
+O socket IPC fica em `$XDG_RUNTIME_DIR/zapshell.sock`; a aquisição usa `flock`
+em `.lock` (modo `0600`) para garantir uma única instância. Conexões que não
+enviam o verbo em 2 s são desligadas, buffers acima de 1 KiB sem nova linha são
+descartados e cada `send()` expira após 1500 ms por padrão.
 
 ## Notificações e permissões
 
@@ -92,7 +112,11 @@ somente para a origem exata `https://web.whatsapp.com` e apenas para captura de
 não chegam — é necessário conceder e recarregar (`Ctrl+R`).
 
 Notificações repetidas do mesmo remitente em até 3 s são agrupadas; clicar na
-notificação abre a janela via `ActionInvoked` (ação `default`).
+notificação abre a janela via `ActionInvoked` (ação `default`). Downloads
+concluídos geram "Download concluído" e downloads cancelados ou interrompidos
+geram "Download interrompido"; em andamento, não há notificação. O agrupador
+guarda no máximo 256 títulos recentes: ao atingir o teto, o mais antigo é
+descartado.
 
 ## Limitações honestas
 
@@ -127,6 +151,10 @@ cmake -S . -B build
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
+
+A suíte é controlada por `ZAPSHELL_BUILD_TESTS` (ligada por padrão). Com
+`-DZAPSHELL_BUILD_TESTS=OFF`, os alvos de teste não são gerados e o componente
+Qt Test não é exigido na compilação.
 
 Testes são guiless. `QT_QPA_PLATFORM=offscreen` com janela WebEngine visível
 causa SIGTRAP no plugin offscreen — use a sessão Wayland para verificação visual.
