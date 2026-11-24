@@ -86,10 +86,14 @@ modo quando um backup é feito, e o perfil restaurado é corrigido no `--restore
 e mídia não ficam legíveis por outros usuários locais.
 
 Backups são `zapshell-AAAAAMMDD-HHMMSS.tar.gz`, com retenção dos 4 mais
-recentes. O app grava um `.partial`, valida o archive com `tar -tzf` e só então
-publica o nome final com `rename()` atômico (POSIX, no mesmo filesystem): o
-archive anterior é substituído sem deixar o caminho vazio e uma falha na
-publicação preserva o backup anterior e remove o `.partial`. `--restore` recusa
+recentes. A criação usa temporário exclusivo no diretório de backup, valida o
+archive com `tar -tzf` e só então publica o nome final com `rename()` atômico
+(POSIX, no mesmo filesystem): o archive anterior é substituído sem deixar o
+caminho vazio, uma falha na publicação preserva o backup anterior e apenas o
+`.partial` legado determinístico (`<archive>.partial`) é limpo no início — nunca
+há varredura de `*.partial` concorrentes. Dois backups no mesmo segundo têm o
+nome final serializado pelo lock e o segundo substitui o primeiro atomicamente.
+O `rename()` não garante durabilidade (`fsync` não é feito). `--restore` recusa
 nomes com `..`, absolutos, links simbólicos e qualquer membro que não seja
 arquivo/diretório; a varredura do staging inclui ocultos e arquivos de sistema
 (`QDir::Hidden | QDir::System`) e os tipos no archive são conferidos pela
@@ -97,10 +101,31 @@ listagem verbose do `tar`. A extração acontece em staging e o perfil anterior 
 guardado como `profile.before-restore-<timestamp>`. Nunca tarre o perfil com o
 app rodando: use `--backup`.
 
-O socket IPC fica em `$XDG_RUNTIME_DIR/zapshell.sock`; a aquisição usa `flock`
-em `.lock` (modo `0600`) para garantir uma única instância. Conexões ociosas por
-2 s são desligadas, buffers acima de 1 KiB sem nova linha são descartados e cada
-`send()` expira após 1500 ms por padrão.
+O socket IPC fica em `$XDG_RUNTIME_DIR/zapshell.sock`. O lock único de
+manutenção é o `flock` em `<socketPath>.lock` (modo `0600`): protege instância,
+backup e restauração. Em `--backup`/`--restore`, a ordem é IPC →
+`waitUntilReleased()` → `acquireMaintenance()` → manutenção → liberação RAII do
+lock → relançamento. `waitUntilReleased()` e `acquireMaintenance()` compartilham
+um orçamento único de 15 s (monotônico, `QDeadlineTimer`), que não inclui o TAR
+e não reinicia; esgotado, a manutenção aborta sem acessar o perfil. A tolerância
+de 16,5 s existe apenas nos testes. Na inicialização, `--hidden`/sem verbo usa
+espera de 15 s só após o IPC falhar; comandos IPC com instância viva não esperam.
+
+Política conservadora de relaunch (ZS-11): não há relançamento automático após
+qualquer falha de aquisição do lock de manutenção, independente de `stats`; a
+ausência de IPC não é usada como heurística de disponibilidade. O stderr informa
+`manutenção abortada; relance manualmente se necessário`. O relançamento após
+falha de backup é preservado somente quando a manutenção foi adquirida e o
+perfil permanece íntegro/pela política original. `--restore` só relança em
+sucesso.
+
+`InstanceLock` (ZS-12): `acquire()`/`acquireMaintenance()` são idempotentes no
+mesmo modo; transições manutenção<->app no mesmo objeto são rejeitadas
+preservando o descritor, sem liberar lock existente para readquirir. Falha de
+`QProcess::startDetached()` (ZS-13) é reportada em stderr, preserva o resultado
+da manutenção e não faz retry. Conexões ociosas por 2 s são desligadas, buffers
+acima de 1 KiB sem nova linha são descartados e cada `send()` expira após 1500 ms
+por padrão.
 
 ## Notificações e permissões
 
@@ -125,6 +150,11 @@ descartado.
   CPU oculto 0–4 %. A meta **não** foi relaxada no spec; os números e as flags
   testadas estão em `docs/superpowers/notes/budget.md`. Falta medir com perfil
   pareado e conversas abertas.
+- **Atomicidade sem durabilidade no backup.** `rename()` evita arquivo parcial,
+  mas não há `fsync()` do arquivo/diretório; queda de energia pode perder dados
+  recém-publicados.
+- **Validação real de systemd pendente.** As units usam o mesmo binário/lock;
+  execução real com `systemctl --user` não foi exercitada neste ciclo.
 - **`--disable-gpu` é padrão** por ter reduzido a amostra de pico, mas ainda
   não foi validado com uma ligação real. Se a chamada falhar, teste sem ele:
   `ZAPSHELL_FLAGS` substitui o conjunto inteiro de flags do Chromium.

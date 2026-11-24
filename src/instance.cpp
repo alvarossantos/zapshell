@@ -33,6 +33,9 @@ InstanceLock::~InstanceLock()
 
 bool InstanceLock::lockAcquire(QString *error, int waitMs)
 {
+    if (m_lockFd >= 0)
+        return true;
+
     const QString lockPath = m_socketPath + QStringLiteral(".lock");
     m_lockFd = ::open(QFile::encodeName(lockPath).constData(),
                       O_CREAT | O_RDWR | O_CLOEXEC, 0600);
@@ -83,55 +86,73 @@ void InstanceLock::lockRelease()
 
 bool InstanceLock::acquire(QString *error, int waitMs)
 {
-    if (!m_server) {
-        if (!lockAcquire(error, waitMs))
-            return false;
+    if (m_server)
+        return true;
 
-        QLocalSocket probe;
-        probe.connectToServer(m_socketPath);
-        if (probe.waitForConnected(300)) {
-            probe.disconnectFromServer();
-            lockRelease();
-            if (error)
-                *error = QStringLiteral("já existe uma instância em execução");
-            return false;
-        }
-
-        // Só reclamar a vaga quando a falha for recusa (socket órfão) ou o
-        // arquivo já ter sumido. Timeout/permissão/arquivo regular podem ser
-        // uma instância viva — remover aqui apagaria a vaga alheia.
-        const bool removable = probe.error() == QLocalSocket::ConnectionRefusedError
-                               || probe.error() == QLocalSocket::ServerNotFoundError;
-        struct stat st{};
-        const bool statOk = ::lstat(QFile::encodeName(m_socketPath).constData(), &st) == 0;
-        const bool socketFile = statOk && S_ISSOCK(st.st_mode);
-        if (!removable || (statOk && !socketFile)) {
-            lockRelease();
-            if (error)
-                *error = QStringLiteral("não foi possível confirmar socket órfão: ") + m_socketPath;
-            return false;
-        }
-        QLocalServer::removeServer(m_socketPath);
-
-        m_server = new QLocalServer(this);
-        if (!m_server->listen(m_socketPath)) {
-            lockRelease();
-            if (error)
-                *error = QStringLiteral("não foi possível abrir %1: %2")
-                             .arg(m_socketPath, m_server->errorString());
-            delete m_server;
-            m_server = nullptr;
-            return false;
-        }
-        connect(m_server, &QLocalServer::newConnection, this, &InstanceLock::handleConnection);
+    if (m_lockFd >= 0) {
+        if (error)
+            *error = QStringLiteral("lock de manutenção já adquirido por este objeto; "
+                                    "transição para instância não é permitida: ")
+                     + m_socketPath;
+        return false;
     }
+
+    if (!lockAcquire(error, waitMs))
+        return false;
+
+    QLocalSocket probe;
+    probe.connectToServer(m_socketPath);
+    if (probe.waitForConnected(300)) {
+        probe.disconnectFromServer();
+        lockRelease();
+        if (error)
+            *error = QStringLiteral("já existe uma instância em execução");
+        return false;
+    }
+
+    // Só reclamar a vaga quando a falha for recusa (socket órfão) ou o
+    // arquivo já ter sumido. Timeout/permissão/arquivo regular podem ser
+    // uma instância viva — remover aqui apagaria a vaga alheia.
+    const bool removable = probe.error() == QLocalSocket::ConnectionRefusedError
+                           || probe.error() == QLocalSocket::ServerNotFoundError;
+    struct stat st{};
+    const bool statOk = ::lstat(QFile::encodeName(m_socketPath).constData(), &st) == 0;
+    const bool socketFile = statOk && S_ISSOCK(st.st_mode);
+    if (!removable || (statOk && !socketFile)) {
+        lockRelease();
+        if (error)
+            *error = QStringLiteral("não foi possível confirmar socket órfão: ") + m_socketPath;
+        return false;
+    }
+    QLocalServer::removeServer(m_socketPath);
+
+    m_server = new QLocalServer(this);
+    if (!m_server->listen(m_socketPath)) {
+        lockRelease();
+        if (error)
+            *error = QStringLiteral("não foi possível abrir %1: %2")
+                         .arg(m_socketPath, m_server->errorString());
+        delete m_server;
+        m_server = nullptr;
+        return false;
+    }
+    connect(m_server, &QLocalServer::newConnection, this, &InstanceLock::handleConnection);
     return true;
 }
 
 bool InstanceLock::acquireMaintenance(QString *error, int waitMs)
 {
+    if (m_server) {
+        if (error)
+            *error = QStringLiteral("lock da aplicação já adquirido por este objeto; "
+                                    "transição para manutenção não é permitida: ")
+                     + m_socketPath;
+        return false;
+    }
+
     if (m_lockFd >= 0)
         return true;
+
     return lockAcquire(error, waitMs);
 }
 
